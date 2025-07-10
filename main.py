@@ -1,6 +1,12 @@
 import customtkinter as ctk
 import threading
 import time
+import os
+import shutil
+import tempfile
+
+# Utilisation de la version patchée "pytubefix" pour éviter les erreurs 400
+from pytubefix import YouTube
 
 
 class VideoProcessor:
@@ -10,9 +16,29 @@ class VideoProcessor:
         self.log = log_callback
 
     def download_video(self, url: str) -> str:
+        """Download the YouTube video to a temporary location."""
         self.log(f"Téléchargement de la vidéo depuis {url} ...")
-        time.sleep(1)
-        return "video.mp4"
+
+        tmp_dir = tempfile.mkdtemp(prefix="yt_dl_")
+        try:
+            yt = YouTube(url)
+            stream = (
+                yt.streams.filter(progressive=True, file_extension="mp4")
+                .order_by("resolution")
+                .desc()
+                .first()
+            )
+
+            if stream is None:
+                raise RuntimeError("Aucune vidéo MP4 disponible")
+
+            self.log(f"Téléchargement de {stream.default_filename} ...")
+            video_path = stream.download(output_path=tmp_dir)
+            return video_path
+        except Exception:
+            # Clean up temporary directory if download fails
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            raise
 
     def center_on_speaker(self, video_path: str) -> str:
         self.log("Centrage de la vidéo sur le locuteur ...")
@@ -26,6 +52,7 @@ class VideoProcessor:
 
     def process(self, url: str) -> None:
         self.log("\n--- Démarrage du traitement ---")
+        video = None
         try:
             video = self.download_video(url)
             centered = self.center_on_speaker(video)
@@ -33,6 +60,12 @@ class VideoProcessor:
             self.log("Traitement terminé")
         except Exception as exc:
             self.log(f"Erreur: {exc}")
+        finally:
+            if video and os.path.exists(video):
+                try:
+                    shutil.rmtree(os.path.dirname(video))
+                except OSError:
+                    pass
 
 
 class App(ctk.CTk):
