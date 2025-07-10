@@ -5,7 +5,9 @@ import os
 import shutil
 import tempfile
 
-from pytube import YouTube
+# Utilisation de la version patchée "pytubefix" pour éviter les erreurs 400
+from pytubefix import YouTube
+
 
 
 class VideoProcessor:

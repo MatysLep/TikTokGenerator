@@ -2,11 +2,11 @@
 
 ## Dépendances
 
-Ce projet utilise `pytube` pour le téléchargement des vidéos YouTube ainsi que
-`customtkinter` pour l'interface graphique. Installez les dépendances avec :
+Ce projet utilise `pytubefix` pour le téléchargement des vidéos YouTube ainsi
+que `customtkinter` pour l'interface graphique. Installez les dépendances avec :
 
 ```bash
-pip install pytube customtkinter
+pip install pytubefix customtkinter
 ```
 
 ## Fonctionnalités
