@@ -1,0 +1,77 @@
+import customtkinter as ctk
+import threading
+import time
+
+
+class VideoProcessor:
+    """Stub class handling video processing steps."""
+
+    def __init__(self, log_callback):
+        self.log = log_callback
+
+    def download_video(self, url: str) -> str:
+        self.log(f"Téléchargement de la vidéo depuis {url} ...")
+        time.sleep(1)
+        return "video.mp4"
+
+    def center_on_speaker(self, video_path: str) -> str:
+        self.log("Centrage de la vidéo sur le locuteur ...")
+        time.sleep(1)
+        return "centered_" + video_path
+
+    def cut_into_clips(self, video_path: str) -> list[str]:
+        self.log("Découpage de la vidéo en clips ...")
+        time.sleep(1)
+        return ["clip_01.mp4"]
+
+    def process(self, url: str) -> None:
+        self.log("\n--- Démarrage du traitement ---")
+        try:
+            video = self.download_video(url)
+            centered = self.center_on_speaker(video)
+            self.cut_into_clips(centered)
+            self.log("Traitement terminé")
+        except Exception as exc:
+            self.log(f"Erreur: {exc}")
+
+
+class App(ctk.CTk):
+    """Interface graphique principale"""
+
+    def __init__(self):
+        super().__init__()
+        self.title("TikTok Generator")
+        self.geometry("600x400")
+
+        # Champ URL
+        self.url_entry = ctk.CTkEntry(self, placeholder_text='Coller le lien YouTube ici')
+        self.url_entry.pack(padx=10, pady=10, fill="x")
+
+        # Bouton de traitement
+        self.process_button = ctk.CTkButton(self, text="Télécharger et Traiter", command=self.start_processing)
+        self.process_button.pack(pady=10)
+
+        # Zone de logs
+        self.log_text = ctk.CTkTextbox(self, state="disabled")
+        self.log_text.pack(padx=10, pady=10, fill="both", expand=True)
+
+        self.processor = VideoProcessor(self.add_log)
+
+    def add_log(self, message: str) -> None:
+        self.log_text.configure(state="normal")
+        self.log_text.insert("end", message + "\n")
+        self.log_text.see("end")
+        self.log_text.configure(state="disabled")
+
+    def start_processing(self) -> None:
+        url = self.url_entry.get().strip()
+        if not url:
+            self.add_log("Veuillez entrer un lien valide.")
+            return
+
+        threading.Thread(target=self.processor.process, args=(url,), daemon=True).start()
+
+
+if __name__ == "__main__":
+    app = App()
+    app.mainloop()
