@@ -19,7 +19,7 @@ pip install pytubefix customtkinter mediapipe opencv-python tqdm
 - Centrage automatique sur le locuteur avec un zoom réglable de 0 à 100 % via
   un curseur. Une étiquette affiche la valeur courante du zoom. La fonction
   `center_on_speaker` applique ce facteur et la vidéo générée est recadrée au
-  format 16/9 sans bandes noires.
+  format 9/16 sans bandes noires.
 - Barre de progression de 3 étapes affichée au-dessus de la console de logs.
 
 

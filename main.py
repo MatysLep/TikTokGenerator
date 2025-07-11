@@ -70,7 +70,7 @@ class VideoProcessor:
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 
-        target_ratio = 16 / 9
+        target_ratio = 9 / 16
         out_w, out_h = width, int(width / target_ratio)
         if out_h > height:
             out_h = height
