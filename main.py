@@ -68,8 +68,11 @@ class VideoProcessor:
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
 
-        face_detection = mp.solutions.face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
-        face_box = None
+        face_detection = mp.solutions.face_detection.FaceDetection(
+            model_selection=1, min_detection_confidence=0.5
+        )
+        face_center = None
+
 
         while True:
             ret, frame = cap.read()
@@ -84,20 +87,19 @@ class VideoProcessor:
                 bbox = detection.location_data.relative_bounding_box
                 cx = int((bbox.xmin + bbox.width / 2) * width)
                 cy = int((bbox.ymin + bbox.height / 2) * height)
-                size = int(max(bbox.width * width, bbox.height * height))
-                face_box = (cx, cy, size)
+                face_center = (cx, cy)
 
-            if face_box is None:
-                face_box = (width // 2, height // 2, min(width, height))
+            if face_center is None:
+                face_center = (width // 2, height // 2)
 
-            cx, cy, size = face_box
-            half = size // 2
-            left = max(cx - half, 0)
-            top = max(cy - half, 0)
-            right = min(cx + half, width)
-            bottom = min(cy + half, height)
+            cx, cy = face_center
+            crop_w = int(width / 1.25)
+            crop_h = int(height / 1.25)
+            left = max(0, min(cx - crop_w // 2, width - crop_w))
+            top = max(0, min(cy - crop_h // 2, height - crop_h))
 
-            cropped = frame[top:bottom, left:right]
+            cropped = frame[top : top + crop_h, left : left + crop_w]
+
             cropped = cv2.resize(cropped, (width, height))
             writer.write(cropped)
 
