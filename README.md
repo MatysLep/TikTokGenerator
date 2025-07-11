@@ -16,5 +16,6 @@ pip install pytubefix customtkinter mediapipe opencv-python
 - Téléchargement temporaire d'une vidéo YouTube.
 - Découpage fictif en clips (fonction `cut_into_clips`).
 - Centrage automatique sur le locuteur avec un zoom d'environ 25 % (fonction
-  `center_on_speaker`).
+  `center_on_speaker`). La vidéo générée est recadrée au format 16/9 sans
+  bandes noires.
 
