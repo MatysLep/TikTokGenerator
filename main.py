@@ -73,6 +73,7 @@ class VideoProcessor:
         )
         face_center = None
 
+
         while True:
             ret, frame = cap.read()
             if not ret:
@@ -98,6 +99,7 @@ class VideoProcessor:
             top = max(0, min(cy - crop_h // 2, height - crop_h))
 
             cropped = frame[top : top + crop_h, left : left + crop_w]
+
             cropped = cv2.resize(cropped, (width, height))
             writer.write(cropped)
 

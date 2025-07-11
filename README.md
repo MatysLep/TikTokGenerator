@@ -17,3 +17,4 @@ pip install pytubefix customtkinter mediapipe opencv-python
 - Découpage fictif en clips (fonction `cut_into_clips`).
 - Centrage automatique sur le locuteur avec un zoom d'environ 25 % (fonction
   `center_on_speaker`).
+
