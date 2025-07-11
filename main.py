@@ -66,13 +66,19 @@ class VideoProcessor:
         fps = cap.get(cv2.CAP_PROP_FPS)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+
+        target_ratio = 16 / 9
+        out_w, out_h = width, int(width / target_ratio)
+        if out_h > height:
+            out_h = height
+            out_w = int(height * target_ratio)
+
+        writer = cv2.VideoWriter(str(output_path), fourcc, fps, (out_w, out_h))
 
         face_detection = mp.solutions.face_detection.FaceDetection(
             model_selection=1, min_detection_confidence=0.5
         )
         face_center = None
-
 
         while True:
             ret, frame = cap.read()
@@ -93,14 +99,14 @@ class VideoProcessor:
                 face_center = (width // 2, height // 2)
 
             cx, cy = face_center
-            crop_w = int(width / 1.25)
-            crop_h = int(height / 1.25)
+            crop_w = int(out_w / 1.25)
+            crop_h = int(out_h / 1.25)
             left = max(0, min(cx - crop_w // 2, width - crop_w))
             top = max(0, min(cy - crop_h // 2, height - crop_h))
 
             cropped = frame[top : top + crop_h, left : left + crop_w]
 
-            cropped = cv2.resize(cropped, (width, height))
+            cropped = cv2.resize(cropped, (out_w, out_h))
             writer.write(cropped)
 
         cap.release()
