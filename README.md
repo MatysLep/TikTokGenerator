@@ -4,11 +4,12 @@
 
 Ce projet utilise `pytubefix` pour le téléchargement des vidéos YouTube ainsi
 que `customtkinter` pour l'interface graphique. Une étape de centrage de la
-vidéo s'appuie sur `mediapipe` et `opencv-python`. Installez les dépendances
-avec :
+vidéo s'appuie sur `mediapipe` et `opencv-python`. Une barre de progression
+basée sur `tqdm` affiche l'avancement du traitement. Installez les
+dépendances avec :
 
 ```bash
-pip install pytubefix customtkinter mediapipe opencv-python
+pip install pytubefix customtkinter mediapipe opencv-python tqdm
 ```
 
 ## Fonctionnalités
@@ -19,5 +20,6 @@ pip install pytubefix customtkinter mediapipe opencv-python
   un curseur. Une étiquette affiche la valeur courante du zoom. La fonction
   `center_on_speaker` applique ce facteur et la vidéo générée est recadrée au
   format 16/9 sans bandes noires.
+- Barre de progression de 3 étapes affichée au-dessus de la console de logs.
 
 
