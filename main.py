@@ -45,7 +45,7 @@ class VideoProcessor:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             raise
 
-    def center_on_speaker(self, video_path: str) -> str:
+    def center_on_speaker(self, video_path: str, zoom_percent: int) -> str:
         self.log("Centrage de la vidéo sur le locuteur ...")
 
         home = Path(os.path.expanduser("~"))
@@ -99,8 +99,9 @@ class VideoProcessor:
                 face_center = (width // 2, height // 2)
 
             cx, cy = face_center
-            crop_w = int(out_w / 1.25)
-            crop_h = int(out_h / 1.25)
+            zoom_factor = 1 + zoom_percent / 100.0
+            crop_w = max(1, int(out_w / zoom_factor))
+            crop_h = max(1, int(out_h / zoom_factor))
             left = max(0, min(cx - crop_w // 2, width - crop_w))
             top = max(0, min(cy - crop_h // 2, height - crop_h))
 
@@ -121,12 +122,12 @@ class VideoProcessor:
         time.sleep(1)
         return ["clip_01.mp4"]
 
-    def process(self, url: str) -> None:
+    def process(self, url: str, zoom_percent: int) -> None:
         self.log("\n--- Démarrage du traitement ---")
         video = None
         try:
             video = self.download_video(url)
-            centered = self.center_on_speaker(video)
+            centered = self.center_on_speaker(video, zoom_percent)
             self.cut_into_clips(centered)
             self.log("Traitement terminé")
         except Exception as exc:
@@ -151,6 +152,12 @@ class App(ctk.CTk):
         self.url_entry = ctk.CTkEntry(self, placeholder_text='Coller le lien YouTube ici')
         self.url_entry.pack(padx=10, pady=10, fill="x")
 
+        self.zoom_label = ctk.CTkLabel(self, text="Zoom sur le visage (%)")
+        self.zoom_label.pack(pady=(5, 0))
+        self.zoom_slider = ctk.CTkSlider(self, from_=0, to=100)
+        self.zoom_slider.set(25)
+        self.zoom_slider.pack(padx=10, pady=5, fill="x")
+
         # Bouton de traitement
         self.process_button = ctk.CTkButton(self, text="Télécharger et Traiter", command=self.start_processing)
         self.process_button.pack(pady=10)
@@ -173,7 +180,8 @@ class App(ctk.CTk):
             self.add_log("Veuillez entrer un lien valide.")
             return
 
-        threading.Thread(target=self.processor.process, args=(url,), daemon=True).start()
+        zoom = int(self.zoom_slider.get())
+        threading.Thread(target=self.processor.process, args=(url, zoom), daemon=True).start()
 
 
 if __name__ == "__main__":
