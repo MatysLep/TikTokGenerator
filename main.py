@@ -45,7 +45,7 @@ class VideoProcessor:
             shutil.rmtree(tmp_dir, ignore_errors=True)
             raise
 
-    def center_on_speaker(self, video_path: str) -> str:
+    def center_on_speaker(self, video_path: str, zoom_percent: int) -> str:
         self.log("Centrage de la vidéo sur le locuteur ...")
 
         home = Path(os.path.expanduser("~"))
@@ -79,6 +79,7 @@ class VideoProcessor:
             model_selection=1, min_detection_confidence=0.5
         )
         face_center = None
+        face_size = None
 
         while True:
             ret, frame = cap.read()
@@ -94,13 +95,21 @@ class VideoProcessor:
                 cx = int((bbox.xmin + bbox.width / 2) * width)
                 cy = int((bbox.ymin + bbox.height / 2) * height)
                 face_center = (cx, cy)
+                face_size = (
+                    int(bbox.width * width),
+                    int(bbox.height * height),
+                )
 
             if face_center is None:
                 face_center = (width // 2, height // 2)
+                face_size = (out_w, out_h)
 
             cx, cy = face_center
-            crop_w = int(out_w / 1.25)
-            crop_h = int(out_h / 1.25)
+            fw, fh = face_size
+            crop_w = int(out_w - (zoom_percent / 100) * (out_w - fw))
+            crop_h = int(out_h - (zoom_percent / 100) * (out_h - fh))
+            crop_w = max(1, min(crop_w, width))
+            crop_h = max(1, min(crop_h, height))
             left = max(0, min(cx - crop_w // 2, width - crop_w))
             top = max(0, min(cy - crop_h // 2, height - crop_h))
 
@@ -121,12 +130,12 @@ class VideoProcessor:
         time.sleep(1)
         return ["clip_01.mp4"]
 
-    def process(self, url: str) -> None:
+    def process(self, url: str, zoom_percent: int) -> None:
         self.log("\n--- Démarrage du traitement ---")
         video = None
         try:
             video = self.download_video(url)
-            centered = self.center_on_speaker(video)
+            centered = self.center_on_speaker(video, zoom_percent)
             self.cut_into_clips(centered)
             self.log("Traitement terminé")
         except Exception as exc:
@@ -151,6 +160,14 @@ class App(ctk.CTk):
         self.url_entry = ctk.CTkEntry(self, placeholder_text='Coller le lien YouTube ici')
         self.url_entry.pack(padx=10, pady=10, fill="x")
 
+        self.zoom_label = ctk.CTkLabel(self, text="Zoom sur le visage (%)")
+        self.zoom_label.pack(pady=(5, 0))
+        self.zoom_slider = ctk.CTkSlider(self, from_=0, to=100, command=self.update_zoom_value)
+        self.zoom_slider.set(25)
+        self.zoom_slider.pack(padx=10, pady=5, fill="x")
+        self.zoom_value = ctk.CTkLabel(self, text="25%")
+        self.zoom_value.pack()
+
         # Bouton de traitement
         self.process_button = ctk.CTkButton(self, text="Télécharger et Traiter", command=self.start_processing)
         self.process_button.pack(pady=10)
@@ -167,13 +184,17 @@ class App(ctk.CTk):
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
 
+    def update_zoom_value(self, value: float) -> None:
+        self.zoom_value.configure(text=f"{int(value)}%")
+
     def start_processing(self) -> None:
         url = self.url_entry.get().strip()
         if not url:
             self.add_log("Veuillez entrer un lien valide.")
             return
 
-        threading.Thread(target=self.processor.process, args=(url,), daemon=True).start()
+        zoom = int(self.zoom_slider.get())
+        threading.Thread(target=self.processor.process, args=(url, zoom), daemon=True).start()
 
 
 if __name__ == "__main__":
