@@ -79,6 +79,7 @@ class VideoProcessor:
             model_selection=1, min_detection_confidence=0.5
         )
         face_center = None
+        face_size = None
 
         while True:
             ret, frame = cap.read()
@@ -94,14 +95,22 @@ class VideoProcessor:
                 cx = int((bbox.xmin + bbox.width / 2) * width)
                 cy = int((bbox.ymin + bbox.height / 2) * height)
                 face_center = (cx, cy)
+                face_size = (
+                    int(bbox.width * width),
+                    int(bbox.height * height),
+                )
 
             if face_center is None:
                 face_center = (width // 2, height // 2)
+                face_size = (out_w, out_h)
 
             cx, cy = face_center
-            zoom_factor = 1 + zoom_percent / 100.0
-            crop_w = max(1, int(out_w / zoom_factor))
-            crop_h = max(1, int(out_h / zoom_factor))
+            fw, fh = face_size
+            crop_w = int(out_w - (zoom_percent / 100) * (out_w - fw))
+            crop_h = int(out_h - (zoom_percent / 100) * (out_h - fh))
+            crop_w = max(1, min(crop_w, width))
+            crop_h = max(1, min(crop_h, height))
+
             left = max(0, min(cx - crop_w // 2, width - crop_w))
             top = max(0, min(cy - crop_h // 2, height - crop_h))
 
@@ -154,9 +163,12 @@ class App(ctk.CTk):
 
         self.zoom_label = ctk.CTkLabel(self, text="Zoom sur le visage (%)")
         self.zoom_label.pack(pady=(5, 0))
-        self.zoom_slider = ctk.CTkSlider(self, from_=0, to=100)
+        self.zoom_slider = ctk.CTkSlider(self, from_=0, to=100, command=self.update_zoom_value)
         self.zoom_slider.set(25)
         self.zoom_slider.pack(padx=10, pady=5, fill="x")
+        self.zoom_value = ctk.CTkLabel(self, text="25%")
+        self.zoom_value.pack()
+
 
         # Bouton de traitement
         self.process_button = ctk.CTkButton(self, text="Télécharger et Traiter", command=self.start_processing)
@@ -173,6 +185,9 @@ class App(ctk.CTk):
         self.log_text.insert("end", message + "\n")
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
+
+    def update_zoom_value(self, value: float) -> None:
+        self.zoom_value.configure(text=f"{int(value)}%")
 
     def start_processing(self) -> None:
         url = self.url_entry.get().strip()
