@@ -4,6 +4,10 @@ import time
 import os
 import shutil
 import tempfile
+from pathlib import Path
+
+import cv2
+import mediapipe as mp
 
 # Utilisation de la version patchée "pytubefix" pour éviter les erreurs 400
 from pytubefix import YouTube
@@ -43,8 +47,66 @@ class VideoProcessor:
 
     def center_on_speaker(self, video_path: str) -> str:
         self.log("Centrage de la vidéo sur le locuteur ...")
-        time.sleep(1)
-        return "centered_" + video_path
+
+        home = Path(os.path.expanduser("~"))
+        downloads_dir = None
+        for name in ("Downloads", "T\xe9l\xe9chargements"):
+            candidate = home / name
+            if candidate.is_dir():
+                downloads_dir = candidate
+                break
+        if downloads_dir is None:
+            downloads_dir = home / "Downloads"
+            downloads_dir.mkdir(parents=True, exist_ok=True)
+
+        output_path = downloads_dir / (Path(video_path).stem + "_centered.mp4")
+
+        cap = cv2.VideoCapture(video_path)
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+
+        face_detection = mp.solutions.face_detection.FaceDetection(model_selection=1, min_detection_confidence=0.5)
+        face_box = None
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            results = face_detection.process(frame_rgb)
+
+            if results.detections:
+                detection = results.detections[0]
+                bbox = detection.location_data.relative_bounding_box
+                cx = int((bbox.xmin + bbox.width / 2) * width)
+                cy = int((bbox.ymin + bbox.height / 2) * height)
+                size = int(max(bbox.width * width, bbox.height * height))
+                face_box = (cx, cy, size)
+
+            if face_box is None:
+                face_box = (width // 2, height // 2, min(width, height))
+
+            cx, cy, size = face_box
+            half = size // 2
+            left = max(cx - half, 0)
+            top = max(cy - half, 0)
+            right = min(cx + half, width)
+            bottom = min(cy + half, height)
+
+            cropped = frame[top:bottom, left:right]
+            cropped = cv2.resize(cropped, (width, height))
+            writer.write(cropped)
+
+        cap.release()
+        writer.release()
+        face_detection.close()
+
+        self.log(f"Vid\xe9o centr\xe9e enregistr\xe9e dans {output_path}")
+        return str(output_path)
 
     def cut_into_clips(self, video_path: str) -> list[str]:
         self.log("Découpage de la vidéo en clips ...")
