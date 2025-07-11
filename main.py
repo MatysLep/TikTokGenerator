@@ -6,6 +6,8 @@ import shutil
 import tempfile
 from pathlib import Path
 
+from tqdm import tqdm
+
 import cv2
 import mediapipe as mp
 
@@ -17,8 +19,9 @@ from pytubefix import YouTube
 class VideoProcessor:
     """Stub class handling video processing steps."""
 
-    def __init__(self, log_callback):
+    def __init__(self, log_callback, progress_callback):
         self.log = log_callback
+        self.update_progress = progress_callback
 
     def download_video(self, url: str) -> str:
         """Download the YouTube video to a temporary location."""
@@ -132,21 +135,33 @@ class VideoProcessor:
         return ["clip_01.mp4"]
 
     def process(self, url: str, zoom_percent: int) -> None:
-        self.log("\n--- Démarrage du traitement ---")
+        self.log("\n--- D\xe9marrage du traitement ---")
         video = None
-        try:
-            video = self.download_video(url)
-            centered = self.center_on_speaker(video, zoom_percent)
-            self.cut_into_clips(centered)
-            self.log("Traitement terminé")
-        except Exception as exc:
-            self.log(f"Erreur: {exc}")
-        finally:
-            if video and os.path.exists(video):
-                try:
-                    shutil.rmtree(os.path.dirname(video))
-                except OSError:
-                    pass
+        with tqdm(total=3, unit="\xe9tape", disable=True) as pbar:
+            try:
+                self.update_progress(0)
+                video = self.download_video(url)
+                pbar.update(1)
+                self.update_progress(pbar.n / pbar.total)
+
+                centered = self.center_on_speaker(video, zoom_percent)
+                pbar.update(1)
+                self.update_progress(pbar.n / pbar.total)
+
+                self.cut_into_clips(centered)
+                pbar.update(1)
+                self.update_progress(pbar.n / pbar.total)
+
+                self.log("Traitement termin\xe9")
+            except Exception as exc:
+                self.log(f"Erreur: {exc}")
+            finally:
+                if video and os.path.exists(video):
+                    try:
+                        shutil.rmtree(os.path.dirname(video))
+                    except OSError:
+                        pass
+                self.update_progress(0)
 
 
 class App(ctk.CTk):
@@ -174,17 +189,25 @@ class App(ctk.CTk):
         self.process_button = ctk.CTkButton(self, text="Télécharger et Traiter", command=self.start_processing)
         self.process_button.pack(pady=10)
 
+        # Barre de progression
+        self.progress_bar = ctk.CTkProgressBar(self)
+        self.progress_bar.set(0)
+        self.progress_bar.pack(padx=10, pady=(0, 10), fill="x")
+
         # Zone de logs
         self.log_text = ctk.CTkTextbox(self, state="disabled")
         self.log_text.pack(padx=10, pady=10, fill="both", expand=True)
 
-        self.processor = VideoProcessor(self.add_log)
+        self.processor = VideoProcessor(self.add_log, self.set_progress)
 
     def add_log(self, message: str) -> None:
         self.log_text.configure(state="normal")
         self.log_text.insert("end", message + "\n")
         self.log_text.see("end")
         self.log_text.configure(state="disabled")
+
+    def set_progress(self, value: float) -> None:
+        self.progress_bar.set(value)
 
     def update_zoom_value(self, value: float) -> None:
         self.zoom_value.configure(text=f"{int(value)}%")
