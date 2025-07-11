@@ -20,3 +20,4 @@ pip install pytubefix customtkinter mediapipe opencv-python
   `center_on_speaker` applique ce facteur et la vidéo générée est recadrée au
   format 16/9 sans bandes noires.
 
+

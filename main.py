@@ -110,6 +110,7 @@ class VideoProcessor:
             crop_h = int(out_h - (zoom_percent / 100) * (out_h - fh))
             crop_w = max(1, min(crop_w, width))
             crop_h = max(1, min(crop_h, height))
+
             left = max(0, min(cx - crop_w // 2, width - crop_w))
             top = max(0, min(cy - crop_h // 2, height - crop_h))
 
@@ -167,6 +168,7 @@ class App(ctk.CTk):
         self.zoom_slider.pack(padx=10, pady=5, fill="x")
         self.zoom_value = ctk.CTkLabel(self, text="25%")
         self.zoom_value.pack()
+
 
         # Bouton de traitement
         self.process_button = ctk.CTkButton(self, text="Télécharger et Traiter", command=self.start_processing)
