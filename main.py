@@ -6,8 +6,6 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from tqdm import tqdm
-
 import cv2
 import mediapipe as mp
 
@@ -135,33 +133,29 @@ class VideoProcessor:
         return ["clip_01.mp4"]
 
     def process(self, url: str, zoom_percent: int) -> None:
-        self.log("\n--- D\xe9marrage du traitement ---")
+        self.log("\n--- Démarrage du traitement ---")
         video = None
-        with tqdm(total=3, unit="\xe9tape", disable=True) as pbar:
-            try:
-                self.update_progress(0)
-                video = self.download_video(url)
-                pbar.update(1)
-                self.update_progress(pbar.n / pbar.total)
+        try:
+            self.update_progress(0)
+            video = self.download_video(url)
+            self.update_progress(1/3)
 
-                centered = self.center_on_speaker(video, zoom_percent)
-                pbar.update(1)
-                self.update_progress(pbar.n / pbar.total)
+            centered = self.center_on_speaker(video, zoom_percent)
+            self.update_progress(2/3)
 
-                self.cut_into_clips(centered)
-                pbar.update(1)
-                self.update_progress(pbar.n / pbar.total)
+            self.cut_into_clips(centered)
+            self.update_progress(1)
 
-                self.log("Traitement termin\xe9")
-            except Exception as exc:
-                self.log(f"Erreur: {exc}")
-            finally:
-                if video and os.path.exists(video):
-                    try:
-                        shutil.rmtree(os.path.dirname(video))
-                    except OSError:
-                        pass
-                self.update_progress(0)
+            self.log("Traitement terminé")
+        except Exception as exc:
+            self.log(f"Erreur: {exc}")
+        finally:
+            if video and os.path.exists(video):
+                try:
+                    shutil.rmtree(os.path.dirname(video))
+                except OSError:
+                    pass
+            self.update_progress(0)
 
 
 class App(ctk.CTk):
