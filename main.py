@@ -5,6 +5,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
+from tkinter import filedialog
 
 import cv2
 import mediapipe as mp
@@ -132,16 +133,22 @@ class VideoProcessor:
         time.sleep(1)
         return ["clip_01.mp4"]
 
-    def process(self, url: str, zoom_percent: int) -> None:
+    def process(self, source: str, zoom_percent: int, is_local: bool) -> None:
         self.log("\n--- Démarrage du traitement ---")
         video = None
         try:
             self.update_progress(0)
-            video = self.download_video(url)
-            self.update_progress(1/3)
+
+            if is_local:
+                self.log(f"Vidéo locale sélectionnée : {source}")
+                video = source
+            else:
+                video = self.download_video(source)
+
+            self.update_progress(1 / 3)
 
             centered = self.center_on_speaker(video, zoom_percent)
-            self.update_progress(2/3)
+            self.update_progress(2 / 3)
 
             self.cut_into_clips(centered)
             self.update_progress(1)
@@ -150,7 +157,7 @@ class VideoProcessor:
         except Exception as exc:
             self.log(f"Erreur: {exc}")
         finally:
-            if video and os.path.exists(video):
+            if not is_local and video and os.path.exists(video):
                 try:
                     shutil.rmtree(os.path.dirname(video))
                 except OSError:
@@ -166,9 +173,22 @@ class App(ctk.CTk):
         self.title("TikTok Generator")
         self.geometry("600x400")
 
-        # Champ URL
-        self.url_entry = ctk.CTkEntry(self, placeholder_text='Coller le lien YouTube ici')
-        self.url_entry.pack(padx=10, pady=10, fill="x")
+        self.source_var = ctk.StringVar(value="url")
+        self.radio_url = ctk.CTkRadioButton(
+            self, text="Lien YouTube", variable=self.source_var, value="url", command=self.toggle_source
+        )
+        self.radio_local = ctk.CTkRadioButton(
+            self, text="Vidéo locale", variable=self.source_var, value="local", command=self.toggle_source
+        )
+        self.radio_url.pack(padx=10, pady=(10, 0), anchor="w")
+        self.radio_local.pack(padx=10, pady=(0, 10), anchor="w")
+
+        # Source widgets
+        self.url_entry = ctk.CTkEntry(self, placeholder_text="Coller le lien YouTube ici")
+        self.browse_button = ctk.CTkButton(self, text="Parcourir", command=self.browse_file)
+        self.video_path = None
+
+        self.toggle_source()
 
         self.zoom_label = ctk.CTkLabel(self, text="Zoom sur le visage (%)")
         self.zoom_label.pack(pady=(5, 0))
@@ -206,14 +226,39 @@ class App(ctk.CTk):
     def update_zoom_value(self, value: float) -> None:
         self.zoom_value.configure(text=f"{int(value)}%")
 
+    def toggle_source(self) -> None:
+        if self.source_var.get() == "url":
+            self.browse_button.pack_forget()
+            self.url_entry.pack(padx=10, pady=10, fill="x")
+        else:
+            self.url_entry.pack_forget()
+            self.browse_button.pack(padx=10, pady=10)
+
+    def browse_file(self) -> None:
+        path = filedialog.askopenfilename(
+            filetypes=[("Videos", "*.mp4 *.mov *.avi *.mkv"), ("All", "*.*")]
+        )
+        if path:
+            self.video_path = path
+            self.add_log(f"Fichier sélectionné : {path}")
+
     def start_processing(self) -> None:
-        url = self.url_entry.get().strip()
-        if not url:
-            self.add_log("Veuillez entrer un lien valide.")
-            return
+        source_type = self.source_var.get()
+        is_local = source_type == "local"
+
+        if is_local:
+            if not self.video_path:
+                self.add_log("Veuillez sélectionner une vidéo locale.")
+                return
+            source = self.video_path
+        else:
+            source = self.url_entry.get().strip()
+            if not source:
+                self.add_log("Veuillez entrer un lien valide.")
+                return
 
         zoom = int(self.zoom_slider.get())
-        threading.Thread(target=self.processor.process, args=(url, zoom), daemon=True).start()
+        threading.Thread(target=self.processor.process, args=(source, zoom, is_local), daemon=True).start()
 
 
 if __name__ == "__main__":
