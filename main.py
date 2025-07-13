@@ -175,17 +175,33 @@ class App(ctk.CTk):
 
         self.source_var = ctk.StringVar(value="url")
         self.radio_url = ctk.CTkRadioButton(
-            self, text="Lien YouTube", variable=self.source_var, value="url", command=self.toggle_source
+            self,
+            text="Lien YouTube",
+            variable=self.source_var,
+            value="url",
+            command=self.toggle_source,
         )
         self.radio_local = ctk.CTkRadioButton(
-            self, text="Vidéo locale", variable=self.source_var, value="local", command=self.toggle_source
+            self,
+            text="Vidéo locale",
+            variable=self.source_var,
+            value="local",
+            command=self.toggle_source,
         )
         self.radio_url.pack(padx=10, pady=(10, 0), anchor="w")
         self.radio_local.pack(padx=10, pady=(0, 10), anchor="w")
 
+        # Conteneur pour l'entrée ou le bouton de sélection
+        self.source_frame = ctk.CTkFrame(self)
+        self.source_frame.pack(fill="x")
+
         # Source widgets
-        self.url_entry = ctk.CTkEntry(self, placeholder_text="Coller le lien YouTube ici")
-        self.browse_button = ctk.CTkButton(self, text="Parcourir", command=self.browse_file)
+        self.url_entry = ctk.CTkEntry(
+            self.source_frame, placeholder_text="Coller le lien YouTube ici"
+        )
+        self.browse_button = ctk.CTkButton(
+            self.source_frame, text="Parcourir", command=self.browse_file
+        )
         self.video_path = None
 
         self.toggle_source()
@@ -227,11 +243,11 @@ class App(ctk.CTk):
         self.zoom_value.configure(text=f"{int(value)}%")
 
     def toggle_source(self) -> None:
+        self.url_entry.pack_forget()
+        self.browse_button.pack_forget()
         if self.source_var.get() == "url":
-            self.browse_button.pack_forget()
             self.url_entry.pack(padx=10, pady=10, fill="x")
         else:
-            self.url_entry.pack_forget()
             self.browse_button.pack(padx=10, pady=10)
 
     def browse_file(self) -> None:
