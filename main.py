@@ -86,6 +86,7 @@ class VideoProcessor:
         )
         face_center = None
         face_size = None
+        tolerance = 50
 
         while True:
             ret, frame = cap.read()
@@ -98,15 +99,25 @@ class VideoProcessor:
             if results.detections:
                 detection = results.detections[0]
                 bbox = detection.location_data.relative_bounding_box
-                cx = int((bbox.xmin + bbox.width / 2) * width)
-                cy = int((bbox.ymin + bbox.height / 2) * height)
-                face_center = (cx, cy)
-                face_size = (
+                cx_new = int((bbox.xmin + bbox.width / 2) * width)
+                cy_new = int((bbox.ymin + bbox.height / 2) * height)
+                size_new = (
                     int(bbox.width * width),
                     int(bbox.height * height),
                 )
 
-            if face_center is None:
+                if face_center is None:
+                    face_center = (cx_new, cy_new)
+                    face_size = size_new
+                else:
+                    px, py = face_center
+                    if (
+                        abs(cx_new - px) > tolerance
+                        or abs(cy_new - py) > tolerance
+                    ):
+                        face_center = (cx_new, cy_new)
+                        face_size = size_new
+            elif face_center is None:
                 face_center = (width // 2, height // 2)
                 face_size = (out_w, out_h)
 
