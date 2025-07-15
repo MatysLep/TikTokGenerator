@@ -133,6 +133,27 @@ class VideoProcessor:
         time.sleep(1)
         return ["clip_01.mp4"]
 
+    def preview_video(self, video_path: str) -> None:
+        """Display the processed video for preview before further steps."""
+        self.log("Prévisualisation du résultat (appuyez sur 'q' pour fermer) ...")
+
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            self.log("Impossible d'ouvrir la vidéo pour prévisualisation")
+            return
+
+        try:
+            while True:
+                ret, frame = cap.read()
+                if not ret:
+                    break
+                cv2.imshow("Prévisualisation", frame)
+                if cv2.waitKey(30) & 0xFF == ord("q"):
+                    break
+        finally:
+            cap.release()
+            cv2.destroyAllWindows()
+
     def process(self, source: str, zoom_percent: int, is_local: bool) -> None:
         self.log("\n--- Démarrage du traitement ---")
         video = None
@@ -149,6 +170,8 @@ class VideoProcessor:
 
             centered = self.center_on_speaker(video, zoom_percent)
             self.update_progress(2 / 3)
+
+            self.preview_video(centered)
 
             self.cut_into_clips(centered)
             self.update_progress(1)

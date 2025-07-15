@@ -22,5 +22,6 @@ pip install pytubefix customtkinter mediapipe opencv-python tqdm
   format 9/16 sans bandes noires.
 - Barre de progression de 3 étapes affichée au-dessus de la console de logs.
 - L'interface permet de choisir entre un lien YouTube et une vidéo locale.
+- Une prévisualisation du résultat est affichée avant le découpage final.
 
 
