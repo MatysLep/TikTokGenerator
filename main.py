@@ -84,8 +84,13 @@ class VideoProcessor:
         face_detection = mp.solutions.face_detection.FaceDetection(
             model_selection=1, min_detection_confidence=0.5
         )
-        face_center = None
-        face_size = None
+        tolerance = 50
+        smooth_factor = 0.2  # interpolation coefficient for smooth transition
+
+        target_center = None
+        target_size = None
+        current_center = None
+        current_size = None
 
         while True:
             ret, frame = cap.read()
@@ -98,20 +103,54 @@ class VideoProcessor:
             if results.detections:
                 detection = results.detections[0]
                 bbox = detection.location_data.relative_bounding_box
-                cx = int((bbox.xmin + bbox.width / 2) * width)
-                cy = int((bbox.ymin + bbox.height / 2) * height)
-                face_center = (cx, cy)
-                face_size = (
+                cx_new = int((bbox.xmin + bbox.width / 2) * width)
+                cy_new = int((bbox.ymin + bbox.height / 2) * height)
+                size_new = (
                     int(bbox.width * width),
                     int(bbox.height * height),
                 )
 
-            if face_center is None:
-                face_center = (width // 2, height // 2)
-                face_size = (out_w, out_h)
+                if target_center is None:
+                    target_center = (cx_new, cy_new)
+                    target_size = size_new
+                    current_center = target_center
+                    current_size = target_size
+                else:
+                    tx, ty = target_center
+                    if (
+                        abs(cx_new - tx) > tolerance
+                        or abs(cy_new - ty) > tolerance
+                    ):
+                        target_center = (cx_new, cy_new)
+                        target_size = size_new
+            elif target_center is None:
+                target_center = (width // 2, height // 2)
+                target_size = (out_w, out_h)
+                current_center = target_center
+                current_size = target_size
 
-            cx, cy = face_center
-            fw, fh = face_size
+            if current_center is None:
+                current_center = target_center
+            else:
+                cx, cy = current_center
+                tx, ty = target_center
+                current_center = (
+                    int(cx + smooth_factor * (tx - cx)),
+                    int(cy + smooth_factor * (ty - cy)),
+                )
+
+            if current_size is None:
+                current_size = target_size
+            else:
+                cw, ch = current_size
+                tw, th = target_size
+                current_size = (
+                    int(cw + smooth_factor * (tw - cw)),
+                    int(ch + smooth_factor * (th - ch)),
+                )
+
+            cx, cy = current_center
+            fw, fh = current_size
             crop_w = int(out_w - (zoom_percent / 100) * (out_w - fw))
             crop_h = int(out_h - (zoom_percent / 100) * (out_h - fh))
             crop_w = max(1, min(crop_w, width))
