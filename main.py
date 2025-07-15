@@ -6,6 +6,8 @@ import shutil
 import tempfile
 from pathlib import Path
 from tkinter import filedialog
+import subprocess
+import sys
 
 import cv2
 import mediapipe as mp
@@ -16,11 +18,13 @@ from pytubefix import YouTube
 
 
 class VideoProcessor:
-    """Stub class handling video processing steps."""
+    """Handle the different video processing steps."""
 
-    def __init__(self, log_callback, progress_callback):
+    def __init__(self, log_callback, progress_callback, done_callback):
         self.log = log_callback
         self.update_progress = progress_callback
+        self.done_callback = done_callback
+        self.output_video: str | None = None
 
     def download_video(self, url: str) -> str:
         """Download the YouTube video to a temporary location."""
@@ -153,7 +157,9 @@ class VideoProcessor:
             self.cut_into_clips(centered)
             self.update_progress(1)
 
+            self.output_video = centered
             self.log("Traitement terminé")
+            self.done_callback(centered)
         except Exception as exc:
             self.log(f"Erreur: {exc}")
         finally:
@@ -172,6 +178,8 @@ class App(ctk.CTk):
         super().__init__()
         self.title("TikTok Generator")
         self.geometry("600x400")
+
+        self.processed_video: str | None = None
 
         self.source_var = ctk.StringVar(value="url")
         self.radio_url = ctk.CTkRadioButton(
@@ -216,8 +224,14 @@ class App(ctk.CTk):
 
 
         # Bouton de traitement
-        self.process_button = ctk.CTkButton(self, text="Télécharger et Traiter", command=self.start_processing)
+        self.process_button = ctk.CTkButton(self, text="Traitement", command=self.start_processing)
         self.process_button.pack(pady=10)
+
+        # Boutons de prévisualisation et téléchargement
+        self.preview_button = ctk.CTkButton(self, text="Prévisualisation", command=self.preview_video, state="disabled")
+        self.preview_button.pack(pady=(0, 5))
+        self.download_button = ctk.CTkButton(self, text="Téléchargement", command=self.save_video, state="disabled")
+        self.download_button.pack()
 
         # Barre de progression
         self.progress_bar = ctk.CTkProgressBar(self)
@@ -228,7 +242,7 @@ class App(ctk.CTk):
         self.log_text = ctk.CTkTextbox(self, state="disabled")
         self.log_text.pack(padx=10, pady=10, fill="both", expand=True)
 
-        self.processor = VideoProcessor(self.add_log, self.set_progress)
+        self.processor = VideoProcessor(self.add_log, self.set_progress, self.processing_done)
 
     def add_log(self, message: str) -> None:
         self.log_text.configure(state="normal")
@@ -238,6 +252,11 @@ class App(ctk.CTk):
 
     def set_progress(self, value: float) -> None:
         self.progress_bar.set(value)
+
+    def processing_done(self, path: str) -> None:
+        self.processed_video = path
+        self.preview_button.configure(state="normal")
+        self.download_button.configure(state="normal")
 
     def update_zoom_value(self, value: float) -> None:
         self.zoom_value.configure(text=f"{int(value)}%")
@@ -258,6 +277,33 @@ class App(ctk.CTk):
             self.video_path = path
             self.add_log(f"Fichier sélectionné : {path}")
 
+    def preview_video(self) -> None:
+        if not self.processed_video:
+            return
+        try:
+            if sys.platform.startswith("darwin"):
+                subprocess.Popen(["open", self.processed_video])
+            elif os.name == "nt":
+                os.startfile(self.processed_video)
+            else:
+                subprocess.Popen(["xdg-open", self.processed_video])
+        except Exception as exc:
+            self.add_log(f"Erreur lors de la prévisualisation : {exc}")
+
+    def save_video(self) -> None:
+        if not self.processed_video:
+            return
+        dest = filedialog.asksaveasfilename(
+            defaultextension=".mp4",
+            filetypes=[("MP4", "*.mp4"), ("All", "*.*")],
+        )
+        if dest:
+            try:
+                shutil.copy(self.processed_video, dest)
+                self.add_log(f"Vidéo enregistrée : {dest}")
+            except Exception as exc:
+                self.add_log(f"Erreur lors de la copie : {exc}")
+
     def start_processing(self) -> None:
         source_type = self.source_var.get()
         is_local = source_type == "local"
@@ -274,7 +320,14 @@ class App(ctk.CTk):
                 return
 
         zoom = int(self.zoom_slider.get())
-        threading.Thread(target=self.processor.process, args=(source, zoom, is_local), daemon=True).start()
+        self.preview_button.configure(state="disabled")
+        self.download_button.configure(state="disabled")
+        self.processed_video = None
+        threading.Thread(
+            target=self.processor.process,
+            args=(source, zoom, is_local),
+            daemon=True,
+        ).start()
 
 
 if __name__ == "__main__":
