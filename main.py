@@ -92,6 +92,7 @@ class VideoProcessor:
         current_center = None
         current_size = None
 
+
         while True:
             ret, frame = cap.read()
             if not ret:
@@ -148,6 +149,7 @@ class VideoProcessor:
                     int(cw + smooth_factor * (tw - cw)),
                     int(ch + smooth_factor * (th - ch)),
                 )
+
 
             cx, cy = current_center
             fw, fh = current_size
