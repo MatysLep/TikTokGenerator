@@ -18,9 +18,10 @@ from pytubefix import YouTube
 class VideoProcessor:
     """Stub class handling video processing steps."""
 
-    def __init__(self, log_callback, progress_callback):
+    def __init__(self, log_callback, progress_callback, preview_callback):
         self.log = log_callback
         self.update_progress = progress_callback
+        self.preview_ready = preview_callback
 
     def download_video(self, url: str) -> str:
         """Download the YouTube video to a temporary location."""
@@ -128,6 +129,27 @@ class VideoProcessor:
         self.log(f"Vid\xe9o centr\xe9e enregistr\xe9e dans {output_path}")
         return str(output_path)
 
+    def preview_video(self, video_path: str) -> None:
+        """Display a simple video preview."""
+        self.log("Ouverture de la prévisualisation. Appuyez sur 'q' pour quitter.")
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            self.log(f"Impossible d'ouvrir {video_path}")
+            return
+
+        window = "Prévisualisation"
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            cv2.imshow(window, frame)
+            if cv2.waitKey(int(1000 / fps)) & 0xFF == ord("q"):
+                break
+
+        cap.release()
+        cv2.destroyWindow(window)
+
     def cut_into_clips(self, video_path: str) -> list[str]:
         self.log("Découpage de la vidéo en clips ...")
         time.sleep(1)
@@ -148,6 +170,7 @@ class VideoProcessor:
             self.update_progress(1 / 3)
 
             centered = self.center_on_speaker(video, zoom_percent)
+            self.preview_ready(centered)
             self.update_progress(2 / 3)
 
             self.cut_into_clips(centered)
@@ -203,6 +226,7 @@ class App(ctk.CTk):
             self.source_frame, text="Parcourir", command=self.browse_file
         )
         self.video_path = None
+        self.preview_path = None
 
         self.toggle_source()
 
@@ -219,6 +243,10 @@ class App(ctk.CTk):
         self.process_button = ctk.CTkButton(self, text="Télécharger et Traiter", command=self.start_processing)
         self.process_button.pack(pady=10)
 
+        # Bouton de prévisualisation
+        self.preview_button = ctk.CTkButton(self, text="Prévisualiser", command=self.show_preview, state="disabled")
+        self.preview_button.pack(pady=(0, 10))
+
         # Barre de progression
         self.progress_bar = ctk.CTkProgressBar(self)
         self.progress_bar.set(0)
@@ -228,7 +256,7 @@ class App(ctk.CTk):
         self.log_text = ctk.CTkTextbox(self, state="disabled")
         self.log_text.pack(padx=10, pady=10, fill="both", expand=True)
 
-        self.processor = VideoProcessor(self.add_log, self.set_progress)
+        self.processor = VideoProcessor(self.add_log, self.set_progress, self.on_preview_ready)
 
     def add_log(self, message: str) -> None:
         self.log_text.configure(state="normal")
@@ -241,6 +269,18 @@ class App(ctk.CTk):
 
     def update_zoom_value(self, value: float) -> None:
         self.zoom_value.configure(text=f"{int(value)}%")
+
+    def on_preview_ready(self, path: str) -> None:
+        def enable():
+            self.preview_path = path
+            self.preview_button.configure(state="normal")
+            self.add_log(f"Prévisualisation disponible : {path}")
+
+        self.after(0, enable)
+
+    def show_preview(self) -> None:
+        if self.preview_path:
+            threading.Thread(target=self.processor.preview_video, args=(self.preview_path,), daemon=True).start()
 
     def toggle_source(self) -> None:
         self.url_entry.pack_forget()
@@ -259,6 +299,7 @@ class App(ctk.CTk):
             self.add_log(f"Fichier sélectionné : {path}")
 
     def start_processing(self) -> None:
+        self.preview_button.configure(state="disabled")
         source_type = self.source_var.get()
         is_local = source_type == "local"
 
