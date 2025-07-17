@@ -8,6 +8,7 @@ from pathlib import Path
 from tkinter import filedialog
 import subprocess
 import sys
+import re
 
 import cv2
 import mediapipe as mp
@@ -25,6 +26,58 @@ class VideoProcessor:
         self.update_progress = progress_callback
         self.done_callback = done_callback
         self.output_video: str | None = None
+
+    def download_youtube_video(self, url: str) -> str:
+        """
+        Télécharge une vidéo YouTube en 4K (si disponible) en téléchargeant séparément
+        les flux vidéo et audio, puis en les fusionnant avec FFmpeg.
+
+        :param url: URL de la vidéo YouTube.
+        """
+        yt = YouTube(url)
+        print(f"Titre de la vidéo : {yt.title}")
+
+        tmp_dir = tempfile.mkdtemp(prefix="yt_dl_")
+
+        # Sélectionner le flux vidéo avec la plus haute résolution
+        video_stream = yt.streams.filter(adaptive=True, only_video=True, file_extension="mp4").order_by(
+            "resolution").desc().first()
+        if not video_stream:
+            raise Exception("Aucun flux vidéo disponible.")
+
+        # Sélectionner le flux audio avec le plus haut débit binaire
+        audio_stream = yt.streams.filter(adaptive=True, only_audio=True, file_extension="mp4").order_by(
+            "abr").desc().first()
+        if not audio_stream:
+            raise Exception("Aucun flux audio disponible.")
+
+        # Définir les chemins de téléchargement
+        video_path = os.path.join(tmp_dir, "video.mp4")
+        audio_path = os.path.join(tmp_dir, "audio.mp4")
+        final_output = os.path.join(tmp_dir, f"{re.sub(r'[\\/*?:"<>|]', "_", yt.title)}.mp4")
+        print(f"Downloading {yt.title} to {final_output}")
+
+        # Télécharger les flux
+        video_path = video_stream.download(output_path=tmp_dir)
+        audio_path = audio_stream.download(output_path=tmp_dir)
+
+        # Fusionner les flux avec FFmpeg
+        print("Fusion des flux vidéo et audio...")
+        command = [
+            "ffmpeg",
+            "-i", video_path,
+            "-i", audio_path,
+            "-c", "copy",
+            final_output
+        ]
+        subprocess.run(command, check=True)
+
+        # Supprimer les fichiers temporaires
+        os.remove(video_path)
+        os.remove(audio_path)
+
+        print(f"Téléchargement et fusion terminés. Fichier disponible à : {final_output}")
+        return final_output
 
     def download_video(self, url: str) -> str:
         """Download the YouTube video to a temporary location."""
@@ -188,7 +241,7 @@ class VideoProcessor:
                 self.log(f"Vidéo locale sélectionnée : {source}")
                 video = source
             else:
-                video = self.download_video(source)
+                video = self.download_youtube_video(source)
 
             self.update_progress(1 / 3)
 
