@@ -87,33 +87,52 @@ class VideoProcessor:
         subprocess.run(command, check=True)
         return audio_output_path
 
-    def add_audio_to_video(self,audio: str, video_without_audio: str) -> str:
+    def add_audio_to_video(self, video_without_audio: str, source_audio: str, start_time: float, end_time: float) -> str:
         """
-        Ajoute l'audio de la vidéo originale à une vidéo centrée ou modifiée (sans son).
-
-        :param audio: Chemin vers la vidéo source (avec audio).
-        :param video_without_audio: Chemin vers la vidéo modifiée (sans audio).
-        :return: Chemin vers la nouvelle vidéo avec audio.
+        Ajoute la portion d'audio comprise entre start_time et end_time (en secondes)
+        du fichier source_audio à la vidéo spécifiée (video_without_audio) qui ne contient pas de son.
+        Retourne le chemin du fichier vidéo de sortie généré avec l'audio fusionné.
         """
-        print(f"Adding audio : {audio}")
-        print(video_without_audio)
-        output_path = video_without_audio.replace(".mp4", "_with_audio.mp4")
+        # Étape 1 : construire le nom du fichier de sortie pour la vidéo avec audio
+        if video_without_audio.endswith('.mp4'):
+            output_video = video_without_audio.replace('.mp4', '_with_audio.mp4')
+        else:
+            output_video = video_without_audio + '.mp4'
 
-        command = [
-            "ffmpeg",
-            "y",
-            "-i", video_without_audio,  # vidéo traitée sans audio
-            "-i", audio,  # vidéo source avec audio
-            "-c:v", "copy",  # copie la vidéo sans ré-encodage
-            "-map", "0:v:0",  # prend la vidéo de l’entrée 0
-            "-map", "1:a:0",  # prend l’audio de l’entrée 1
-            "-c:a", "aac",  # encode l’audio en AAC (compatible .mp4)
-            "-shortest",  # coupe à la plus courte des deux
-            output_path
+        # Étape 2 : extraire le segment audio du fichier source entre start_time et end_time
+        audio_segment = "temp_audio_segment.m4a"  # fichier temporaire pour le segment audio
+        extract_cmd = [
+            "ffmpeg", "-y",  # -y pour écraser le fichier existant si nécessaire
+            "-i", source_audio,  # fichier audio source
+            "-ss", str(start_time),  # heure de début en secondes
+            "-to", str(end_time),  # heure de fin en secondes
+            "-c", "copy",  # copie sans réencoder pour extraire exactement le segment
+            audio_segment
         ]
+        subprocess.run(extract_cmd, check=True)
 
-        subprocess.run(command, check=True)
-        return output_path
+        # Étape 3 : fusionner le segment audio extrait avec la vidéo sans audio
+        merge_cmd = [
+            "ffmpeg", "-y",
+            "-i", video_without_audio,  # clip vidéo sans piste audio
+            "-i", audio_segment,  # segment audio extrait à insérer
+            "-map", "0:v:0",  # mappe la piste vidéo de la première entrée
+            "-map", "1:a:0",  # mappe la piste audio de la seconde entrée
+            "-c:v", "copy",  # copie la vidéo sans réencodage pour conserver la qualité
+            "-c:a", "aac",  # encode l'audio en AAC (compatible MP4)
+            "-shortest",  # coupe la sortie à la durée du flux le plus court (ici l'audio, si plus court)
+            output_video
+        ]
+        subprocess.run(merge_cmd, check=True)
+
+        # Étape 4 : nettoyage du fichier audio temporaire
+        try:
+            import os
+            os.remove(audio_segment)
+        except OSError:
+            pass
+
+        return output_video
 
     def center_on_speaker(self, video_path: str, zoom_percent: int) -> str:
         self.log("Centrage de la vidéo sur le locuteur ...")
@@ -237,10 +256,63 @@ class VideoProcessor:
         self.log(f"Vid\xe9o centr\xe9e enregistr\xe9e dans {output_path}")
         return str(output_path)
 
-    def cut_into_clips(self, video_path: str) -> list[str]:
-        self.log("Découpage de la vidéo en clips ...")
-        time.sleep(1)
-        return ["clip_01.mp4"]
+    def cut_into_clips(self, video_path: str, audio_path : str, tmp_dir : Path) -> list[str]:
+        """
+        Découpe la vidéo en clips de 1 minute 01 secondes maximum.
+
+        :param video_path: Chemin de la vidéo d'entrée.
+        :return: Liste des chemins vers les clips générés.
+        """
+        self.log("Découpage en clips de 61 secondes...")
+
+        output_clips = []
+        home = Path(os.path.expanduser("~"))
+        downloads = home / "Downloads"
+
+
+        # Obtenir la durée de la vidéo
+        command_duration = [
+            "ffprobe", "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            video_path
+        ]
+        result = subprocess.run(command_duration, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        total_duration = float(result.stdout.strip())
+        segment_duration = 61  # secondes
+
+        start = 0
+        index = 1
+        while start < total_duration:
+            clip_name = f"clip_{index:02d}.mp4"
+            output_path = tmp_dir / clip_name
+            command_cut = [
+                "ffmpeg",
+                "-y",
+                "-i", video_path,
+                "-ss", str(int(start)),
+                "-t", str(segment_duration),
+                "-c", "copy",
+                str(output_path)
+            ]
+            subprocess.run(command_cut, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+            # Ajout de l’audio synchronisé
+            clip_start = start
+            clip_end = min(start + segment_duration, total_duration)
+            # Créer le dossier clips juste avant de stocker le clip final avec audio
+            clips_dir = downloads / "clips"
+            clips_dir.mkdir(parents=True, exist_ok=True)
+            final_clip_path = clips_dir / clip_name
+            output_with_audio = self.add_audio_to_video(str(output_path), audio_path, clip_start, clip_end)
+            shutil.move(output_with_audio, final_clip_path)
+            output_clips.append(str(final_clip_path))
+            index += 1
+            start += segment_duration
+
+        self.log(f"{len(output_clips)} clips générés dans {clips_dir}")
+        return output_clips
+
 
     def process(self, source: str, zoom_percent: int, is_local: bool, title : str) -> None:
         self.log("\n--- Démarrage du traitement ---")
@@ -263,11 +335,10 @@ class VideoProcessor:
 
             centered = self.center_on_speaker(video, zoom_percent)
             print(f"centered : {centered} ")
-            output = self.add_audio_to_video(audio, centered)
-            self.log(f"Vidéo finale avec audio : {output}")
+
             self.update_progress(2 / 3)
 
-            self.cut_into_clips(centered)
+            self.cut_into_clips(centered, audio, Path(tmp_dir))
             self.update_progress(1)
 
             self.output_video = centered
