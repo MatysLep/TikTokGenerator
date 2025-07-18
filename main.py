@@ -16,7 +16,7 @@ import mediapipe as mp
 # Utilisation de la version patchée "pytubefix" pour éviter les erreurs 400
 from pytubefix import YouTube
 
-
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'  # 0 = all logs, 1 = INFO removed, 2 = +WARNING removed, 3 = only ERROR
 
 class VideoProcessor:
     """Handle the different video processing steps."""
@@ -27,7 +27,7 @@ class VideoProcessor:
         self.done_callback = done_callback
         self.output_video: str | None = None
 
-    def download_youtube_video(self, url: str) -> str:
+    def download_youtube_video(self, url: str, tmp_dir : str) -> tuple[str, str, str]:
         """
         Télécharge une vidéo YouTube en 4K (si disponible) en téléchargeant séparément
         les flux vidéo et audio, puis en les fusionnant avec FFmpeg.
@@ -36,8 +36,7 @@ class VideoProcessor:
         """
         yt = YouTube(url)
         print(f"Titre de la vidéo : {yt.title}")
-
-        tmp_dir = tempfile.mkdtemp(prefix="yt_dl_")
+        title = re.sub(r'[\\/*?:"<>|]', "_", yt.title)
 
         # Sélectionner le flux vidéo avec la plus haute résolution
         video_stream = yt.streams.filter(adaptive=True, only_video=True, file_extension="mp4").order_by(
@@ -54,55 +53,67 @@ class VideoProcessor:
         # Définir les chemins de téléchargement
         video_path = os.path.join(tmp_dir, "video.mp4")
         audio_path = os.path.join(tmp_dir, "audio.mp4")
-        final_output = os.path.join(tmp_dir, f"{re.sub(r'[\\/*?:"<>|]', "_", yt.title)}.mp4")
-        print(f"Downloading {yt.title} to {final_output}")
 
         # Télécharger les flux
         video_path = video_stream.download(output_path=tmp_dir)
         audio_path = audio_stream.download(output_path=tmp_dir)
 
-        # Fusionner les flux avec FFmpeg
-        print("Fusion des flux vidéo et audio...")
+        return title, video_path, audio_path
+
+    def extract_audio(self, video_path: str, audio_output_path: str, temp_dir: str):
+        # Extraire uniquement le nom de fichier
+        print("Extracting audio from video.")
+        filename = os.path.basename(video_path)
+        print(f"Extracting audio from video : {filename}")
+
+        # Nettoyer uniquement le nom
+        safe_filename = re.sub(r'[\\/*?:"<>|]', "_", filename)
+
+        # Recomposer le chemin complet dans le même dossier
+        new_video_path = os.path.join(temp_dir, safe_filename)
+
+        # Renommer le fichier
+        os.rename(video_path, new_video_path)
+
+        # Lancer ffmpeg pour extraire l'audio
         command = [
             "ffmpeg",
-            "-i", video_path,
-            "-i", audio_path,
-            "-c", "copy",
-            final_output
+            "-y",
+            "-i", new_video_path,
+            "-q:a", "0",
+            "-map", "a",
+            audio_output_path
         ]
         subprocess.run(command, check=True)
+        return audio_output_path
 
-        # Supprimer les fichiers temporaires
-        os.remove(video_path)
-        os.remove(audio_path)
+    def add_audio_to_video(self,audio: str, video_without_audio: str) -> str:
+        """
+        Ajoute l'audio de la vidéo originale à une vidéo centrée ou modifiée (sans son).
 
-        print(f"Téléchargement et fusion terminés. Fichier disponible à : {final_output}")
-        return final_output
+        :param audio: Chemin vers la vidéo source (avec audio).
+        :param video_without_audio: Chemin vers la vidéo modifiée (sans audio).
+        :return: Chemin vers la nouvelle vidéo avec audio.
+        """
+        print(f"Adding audio : {audio}")
+        print(video_without_audio)
+        output_path = video_without_audio.replace(".mp4", "_with_audio.mp4")
 
-    def download_video(self, url: str) -> str:
-        """Download the YouTube video to a temporary location."""
-        self.log(f"Téléchargement de la vidéo depuis {url} ...")
+        command = [
+            "ffmpeg",
+            "y",
+            "-i", video_without_audio,  # vidéo traitée sans audio
+            "-i", audio,  # vidéo source avec audio
+            "-c:v", "copy",  # copie la vidéo sans ré-encodage
+            "-map", "0:v:0",  # prend la vidéo de l’entrée 0
+            "-map", "1:a:0",  # prend l’audio de l’entrée 1
+            "-c:a", "aac",  # encode l’audio en AAC (compatible .mp4)
+            "-shortest",  # coupe à la plus courte des deux
+            output_path
+        ]
 
-        tmp_dir = tempfile.mkdtemp(prefix="yt_dl_")
-        try:
-            yt = YouTube(url)
-            stream = (
-                yt.streams.filter(progressive=True, file_extension="mp4")
-                .order_by("resolution")
-                .desc()
-                .first()
-            )
-
-            if stream is None:
-                raise RuntimeError("Aucune vidéo MP4 disponible")
-
-            self.log(f"Téléchargement de {stream.default_filename} ...")
-            video_path = stream.download(output_path=tmp_dir)
-            return video_path
-        except Exception:
-            # Clean up temporary directory if download fails
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-            raise
+        subprocess.run(command, check=True)
+        return output_path
 
     def center_on_speaker(self, video_path: str, zoom_percent: int) -> str:
         self.log("Centrage de la vidéo sur le locuteur ...")
@@ -231,21 +242,29 @@ class VideoProcessor:
         time.sleep(1)
         return ["clip_01.mp4"]
 
-    def process(self, source: str, zoom_percent: int, is_local: bool) -> None:
+    def process(self, source: str, zoom_percent: int, is_local: bool, title : str) -> None:
         self.log("\n--- Démarrage du traitement ---")
-        video = None
+        tmp_dir = tempfile.mkdtemp(prefix="yt_dl_")
+        title, video, audio = "", "", ""
         try:
             self.update_progress(0)
 
             if is_local:
                 self.log(f"Vidéo locale sélectionnée : {source}")
                 video = source
+                audio = self.extract_audio(video, os.path.join(tmp_dir, "audio.mp4"), tmp_dir)
+                print(f"audio : {audio}")
+                print(f"video : {video}")
+                title = title
             else:
-                video = self.download_youtube_video(source)
+                title,video,audio = self.download_youtube_video(source, tmp_dir)
 
             self.update_progress(1 / 3)
 
             centered = self.center_on_speaker(video, zoom_percent)
+            print(f"centered : {centered} ")
+            output = self.add_audio_to_video(audio, centered)
+            self.log(f"Vidéo finale avec audio : {output}")
             self.update_progress(2 / 3)
 
             self.cut_into_clips(centered)
@@ -417,9 +436,10 @@ class App(ctk.CTk):
         self.preview_button.configure(state="disabled")
         self.download_button.configure(state="disabled")
         self.processed_video = None
+        title = "video" if is_local else "youtube_video"  # ou génère un vrai titre
         threading.Thread(
             target=self.processor.process,
-            args=(source, zoom, is_local),
+            args=(source, zoom, is_local,title),
             daemon=True,
         ).start()
 
