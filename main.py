@@ -1,6 +1,5 @@
 import customtkinter as ctk
 import threading
-import time
 import os
 import shutil
 import tempfile
@@ -314,22 +313,14 @@ class VideoProcessor:
         return output_clips
 
 
-    def process(self, source: str, zoom_percent: int, is_local: bool, title : str) -> None:
+    def process(self, source: str, zoom_percent: int) -> None:
         self.log("\n--- Démarrage du traitement ---")
         tmp_dir = tempfile.mkdtemp(prefix="yt_dl_")
-        title, video, audio = "", "", ""
+        video, audio = "", ""
         try:
             self.update_progress(0)
 
-            if is_local:
-                self.log(f"Vidéo locale sélectionnée : {source}")
-                video = source
-                audio = self.extract_audio(video, os.path.join(tmp_dir, "audio.mp4"), tmp_dir)
-                print(f"audio : {audio}")
-                print(f"video : {video}")
-                title = title
-            else:
-                title,video,audio = self.download_youtube_video(source, tmp_dir)
+            _, video, audio = self.download_youtube_video(source, tmp_dir)
 
             self.update_progress(1 / 3)
 
@@ -347,7 +338,7 @@ class VideoProcessor:
         except Exception as exc:
             self.log(f"Erreur: {exc}")
         finally:
-            if not is_local and video and os.path.exists(video):
+            if video and os.path.exists(video):
                 try:
                     shutil.rmtree(os.path.dirname(video))
                 except OSError:
@@ -365,38 +356,10 @@ class App(ctk.CTk):
 
         self.processed_video: str | None = None
 
-        self.source_var = ctk.StringVar(value="url")
-        self.radio_url = ctk.CTkRadioButton(
-            self,
-            text="Lien YouTube",
-            variable=self.source_var,
-            value="url",
-            command=self.toggle_source,
-        )
-        self.radio_local = ctk.CTkRadioButton(
-            self,
-            text="Vidéo locale",
-            variable=self.source_var,
-            value="local",
-            command=self.toggle_source,
-        )
-        self.radio_url.pack(padx=10, pady=(10, 0), anchor="w")
-        self.radio_local.pack(padx=10, pady=(0, 10), anchor="w")
-
-        # Conteneur pour l'entrée ou le bouton de sélection
-        self.source_frame = ctk.CTkFrame(self)
-        self.source_frame.pack(fill="x")
-
-        # Source widgets
         self.url_entry = ctk.CTkEntry(
-            self.source_frame, placeholder_text="Coller le lien YouTube ici"
+            self, placeholder_text="Coller le lien YouTube ici"
         )
-        self.browse_button = ctk.CTkButton(
-            self.source_frame, text="Parcourir", command=self.browse_file
-        )
-        self.video_path = None
-
-        self.toggle_source()
+        self.url_entry.pack(padx=10, pady=10, fill="x")
 
         self.zoom_label = ctk.CTkLabel(self, text="Zoom sur le visage (%)")
         self.zoom_label.pack(pady=(5, 0))
@@ -445,21 +408,6 @@ class App(ctk.CTk):
     def update_zoom_value(self, value: float) -> None:
         self.zoom_value.configure(text=f"{int(value)}%")
 
-    def toggle_source(self) -> None:
-        self.url_entry.pack_forget()
-        self.browse_button.pack_forget()
-        if self.source_var.get() == "url":
-            self.url_entry.pack(padx=10, pady=10, fill="x")
-        else:
-            self.browse_button.pack(padx=10, pady=10)
-
-    def browse_file(self) -> None:
-        path = filedialog.askopenfilename(
-            filetypes=[("Videos", "*.mp4 *.mov *.avi *.mkv"), ("All", "*.*")]
-        )
-        if path:
-            self.video_path = path
-            self.add_log(f"Fichier sélectionné : {path}")
 
     def preview_video(self) -> None:
         if not self.processed_video:
@@ -489,28 +437,18 @@ class App(ctk.CTk):
                 self.add_log(f"Erreur lors de la copie : {exc}")
 
     def start_processing(self) -> None:
-        source_type = self.source_var.get()
-        is_local = source_type == "local"
-
-        if is_local:
-            if not self.video_path:
-                self.add_log("Veuillez sélectionner une vidéo locale.")
-                return
-            source = self.video_path
-        else:
-            source = self.url_entry.get().strip()
-            if not source:
-                self.add_log("Veuillez entrer un lien valide.")
-                return
+        source = self.url_entry.get().strip()
+        if not source:
+            self.add_log("Veuillez entrer un lien valide.")
+            return
 
         zoom = int(self.zoom_slider.get())
         self.preview_button.configure(state="disabled")
         self.download_button.configure(state="disabled")
         self.processed_video = None
-        title = "video" if is_local else "youtube_video"  # ou génère un vrai titre
         threading.Thread(
             target=self.processor.process,
-            args=(source, zoom, is_local,title),
+            args=(source, zoom),
             daemon=True,
         ).start()
 
