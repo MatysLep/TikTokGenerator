@@ -20,17 +20,22 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 class VideoProcessor:
     """Handle the different video processing steps."""
 
-    def __init__(self, log_callback, progress_callback, done_callback):
+    def __init__(self, log_callback, progress_callback, done_callback,):
         self.log = log_callback
         self.update_progress = progress_callback
         self.done_callback = done_callback
         self.output_video: str | None = None
+        self.tmp_dir = tempfile.mkdtemp(prefix="yt_dl_")
+        self.audio_path: str | None = None
+        self.video_path: str | None = None
+        self.title: str | None = None
 
-    def download_youtube_video(self, url: str, tmp_dir: str) -> tuple[str, str, str]:
+
+    def download_youtube_video(self, url: str) -> None:
         """Download a YouTube video and return title, video path and audio path."""
         yt = YouTube(url)
         self.log(f"Titre de la vidéo : {yt.title}")
-        title = re.sub(r'[\\/*?:"<>|]', "_", yt.title)
+        self.title = re.sub(r'[\\/*?:"<>|]', "_", yt.title)
 
         video_stream = (
             yt.streams.filter(adaptive=True, only_video=True, file_extension="mp4")
@@ -50,36 +55,12 @@ class VideoProcessor:
         if not audio_stream:
             raise Exception("Aucun flux audio disponible.")
 
-        video_path = video_stream.download(output_path=tmp_dir)
-        audio_path = audio_stream.download(output_path=tmp_dir)
-
-        return title, video_path, audio_path
-
-    def extract_audio(self, video_path: str, audio_output_path: str, temp_dir: str) -> str:
-        """Extract audio from a video using ffmpeg."""
-        filename = os.path.basename(video_path)
-        safe_filename = re.sub(r'[\\/*?:"<>|]', "_", filename)
-        new_video_path = os.path.join(temp_dir, safe_filename)
-        os.rename(video_path, new_video_path)
-
-        command = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            new_video_path,
-            "-q:a",
-            "0",
-            "-map",
-            "a",
-            audio_output_path,
-        ]
-        subprocess.run(command, check=True)
-        return audio_output_path
+        self.video_path = video_stream.download(output_path=self.tmp_dir)
+        self.audio_path = audio_stream.download(output_path=self.tmp_dir)
 
     def add_audio_to_video(
         self,
         video_without_audio: str,
-        source_audio: str,
         start_time: float,
         end_time: float,
     ) -> str:
@@ -95,7 +76,7 @@ class VideoProcessor:
             "ffmpeg",
             "-y",
             "-i",
-            source_audio,
+            self.audio_path,
             "-ss",
             str(start_time),
             "-to",
@@ -133,14 +114,14 @@ class VideoProcessor:
 
         return output_video
 
-    def center_on_speaker(self, video_path: str, zoom_percent: int) -> str:
+    def center_on_speaker(self, zoom_percent: int) -> str:
         """Center video on the detected speaker."""
         self.log("Centrage de la vidéo sur le locuteur ...")
 
         downloads_dir = get_downloads_dir()
-        output_path = downloads_dir / f"{Path(video_path).stem}_centered.mp4"
+        self.output_video = downloads_dir / f"{Path(self.video_path).stem}_centered.mp4"
 
-        cap = cv2.VideoCapture(video_path)
+        cap = cv2.VideoCapture(self.video_path)
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
         fps = cap.get(cv2.CAP_PROP_FPS)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -152,7 +133,7 @@ class VideoProcessor:
             out_h = height
             out_w = int(height * target_ratio)
 
-        writer = cv2.VideoWriter(str(output_path), fourcc, fps, (out_w, out_h))
+        writer = cv2.VideoWriter(str(self.output_video), fourcc, fps, (out_w, out_h))
 
         face_detection = mp.solutions.face_detection.FaceDetection(
             model_selection=1, min_detection_confidence=0.5
@@ -237,10 +218,10 @@ class VideoProcessor:
         writer.release()
         face_detection.close()
 
-        self.log(f"Vidéo centrée enregistrée dans {output_path}")
-        return str(output_path)
+        self.log(f"Vidéo centrée enregistrée dans {self.output_video}")
+        return str(self.output_video)
 
-    def cut_into_clips(self, video_path: str, audio_path: str, tmp_dir: Path) -> list[str]:
+    def cut_into_clips(self) -> list[str]:
         """Cut the video into 61-second clips with audio."""
         self.log("Découpage en clips de 61 secondes...")
 
@@ -255,7 +236,7 @@ class VideoProcessor:
             "format=duration",
             "-of",
             "default=noprint_wrappers=1:nokey=1",
-            video_path,
+            self.video_path,
         ]
         result = subprocess.run(
             command_duration,
@@ -270,12 +251,12 @@ class VideoProcessor:
         index = 1
         while start < total_duration:
             clip_name = f"clip_{index:02d}.mp4"
-            output_path = tmp_dir / clip_name
+            output_path = Path(self.tmp_dir) / clip_name
             command_cut = [
                 "ffmpeg",
                 "-y",
                 "-i",
-                video_path,
+                str(self.output_video),
                 "-ss",
                 str(int(start)),
                 "-t",
@@ -291,7 +272,7 @@ class VideoProcessor:
             clips_dir = downloads / "clips"
             clips_dir.mkdir(parents=True, exist_ok=True)
             final_clip_path = clips_dir / clip_name
-            output_with_audio = self.add_audio_to_video(str(output_path), audio_path, clip_start, clip_end)
+            output_with_audio = self.add_audio_to_video(str(output_path), clip_start, clip_end)
             shutil.move(output_with_audio, final_clip_path)
             output_clips.append(str(final_clip_path))
             index += 1
@@ -302,27 +283,23 @@ class VideoProcessor:
 
     def process(self, source: str, zoom_percent: int) -> None:
         self.log("\n--- Démarrage du traitement ---")
-        tmp_dir = tempfile.mkdtemp(prefix="yt_dl_")
-        video = ""
-        audio = ""
         try:
             self.update_progress(0)
 
-            _, video, audio = self.download_youtube_video(source, tmp_dir)
+            self.download_youtube_video(source)
             self.update_progress(1 / 3)
 
-            centered = self.center_on_speaker(video, zoom_percent)
+            centered = self.center_on_speaker(zoom_percent)
             self.update_progress(2 / 3)
 
-            self.cut_into_clips(centered, audio, Path(tmp_dir))
+            self.cut_into_clips()
             self.update_progress(1)
 
-            self.output_video = centered
             self.log("Traitement terminé")
             self.done_callback(centered)
         except Exception as exc:
             self.log(f"Erreur: {exc}")
         finally:
-            if video and os.path.exists(video):
-                safe_rmtree(os.path.dirname(video))
+            if self.video_path and os.path.exists(self.video_path):
+                safe_rmtree(os.path.dirname(self.video_path))
             self.update_progress(0)
