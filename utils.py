@@ -46,7 +46,7 @@ def generate_srt_file(audio_path : str) -> str:
                 return f"{int(h):02}:{int(m):02}:{int(s):02},{ms:03}"
 
             f.write(f"{i+1}\n{format_time(start)} --> {format_time(end)}\n{text}\n\n")
-    print("✅ Sous-titres générés dans clip.srt")
+    print(file_path)
     return file_path
 
 if __name__ == "__main__":

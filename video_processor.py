@@ -11,7 +11,8 @@ import cv2
 import mediapipe as mp
 from pytubefix import YouTube
 
-from utils import get_downloads_dir, safe_rmtree
+import utils
+from utils import get_downloads_dir, safe_rmtree, generate_srt_file
 
 # Reduce TensorFlow logging from MediaPipe
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -114,12 +115,11 @@ class VideoProcessor:
 
         return output_video
 
-    def center_on_speaker(self, zoom_percent: int) -> str:
+    def center_on_speaker(self, zoom_percent: int):
         """Center video on the detected speaker."""
         self.log("Centrage de la vidéo sur le locuteur ...")
 
-        downloads_dir = get_downloads_dir()
-        self.output_video = downloads_dir / f"{Path(self.video_path).stem}_centered.mp4"
+        self.output_video = os.path.join(self.tmp_dir, f"{Path(self.video_path).stem}_centered.mp4")
 
         cap = cv2.VideoCapture(self.video_path)
         fourcc = cv2.VideoWriter_fourcc(*"mp4v")
@@ -219,7 +219,6 @@ class VideoProcessor:
         face_detection.close()
 
         self.log(f"Vidéo centrée enregistrée dans {self.output_video}")
-        return str(self.output_video)
 
     def cut_into_clips(self) -> list[str]:
         """Cut the video into 61-second clips with audio."""
@@ -255,10 +254,10 @@ class VideoProcessor:
             command_cut = [
                 "ffmpeg",
                 "-y",
-                "-i",
-                str(self.output_video),
                 "-ss",
                 str(int(start)),
+                "-i",
+                str(self.output_video),
                 "-t",
                 str(segment_duration),
                 "-c",
@@ -281,25 +280,49 @@ class VideoProcessor:
         self.log(f"{len(output_clips)} clips générés dans {clips_dir}")
         return output_clips
 
+    def add_subtitles_to_video(self) -> None:
+        """
+        Add subtitles from an SRT file to a video using ffmpeg.
+        """
+        self.log("--- Ajout des subtitles ---")
+
+        str_filepath = utils.generate_srt_file(self.audio_path)
+        output_path = str(self.output_video).replace(".mp4", "_subtitled.mp4")
+
+        command = [
+            "ffmpeg",
+            "-y",
+            "-i", self.output_video,
+            "-vf", f"subtitles={str_filepath}",
+            "-c:a", "copy",
+            output_path,
+        ]
+        subprocess.run(command, check=True)
+        self.output_video = output_path
+
     def process(self, source: str, zoom_percent: int) -> None:
         self.log("\n--- Démarrage du traitement ---")
+        print(self.tmp_dir)
         try:
             self.update_progress(0)
 
             self.download_youtube_video(source)
             self.update_progress(1 / 3)
 
-            centered = self.center_on_speaker(zoom_percent)
+            self.center_on_speaker(zoom_percent)
             self.update_progress(2 / 3)
+
+            self.add_subtitles_to_video()
 
             self.cut_into_clips()
             self.update_progress(1)
 
             self.log("Traitement terminé")
-            self.done_callback(centered)
+            self.done_callback(self.output_video)
         except Exception as exc:
             self.log(f"Erreur: {exc}")
         finally:
             if self.video_path and os.path.exists(self.video_path):
                 safe_rmtree(os.path.dirname(self.video_path))
             self.update_progress(0)
+
