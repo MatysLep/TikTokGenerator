@@ -5,7 +5,9 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
+import asyncio
 
 import cv2
 import mediapipe as mp
@@ -13,6 +15,7 @@ from pytubefix import YouTube
 
 import utils
 from utils import get_downloads_dir, safe_rmtree, generate_srt_file
+
 
 # Reduce TensorFlow logging from MediaPipe
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -30,6 +33,9 @@ class VideoProcessor:
         self.audio_path: str | None = None
         self.video_path: str | None = None
         self.title: str | None = None
+        self.author: str | None = None
+        self.description_tiktok: str | None = None
+        self.hashtag: [str] = None
 
 
     def download_youtube_video(self, url: str) -> None:
@@ -37,6 +43,8 @@ class VideoProcessor:
         yt = YouTube(url)
         self.log(f"Titre de la vidéo : {yt.title}")
         self.title = re.sub(r'[\\/*?:"<>|]', "_", yt.title)
+        self.author = yt.author
+        self.hashtag = re.findall(r"#\w+", self.description_ytb)
 
         video_stream = (
             yt.streams.filter(adaptive=True, only_video=True, file_extension="mp4")
@@ -280,13 +288,12 @@ class VideoProcessor:
         self.log(f"{len(output_clips)} clips générés dans {clips_dir}")
         return output_clips
 
-    def add_subtitles_to_video(self) -> None:
+    def add_subtitles_to_video(self,str_filepath) -> None:
         """
         Add subtitles from an SRT file to a video using ffmpeg.
         """
         self.log("--- Ajout des subtitles ---")
 
-        str_filepath = utils.generate_srt_file(self.audio_path)
         output_path = str(self.output_video).replace(".mp4", "_subtitled.mp4")
 
         command = [
@@ -300,24 +307,34 @@ class VideoProcessor:
         subprocess.run(command, check=True)
         self.output_video = output_path
 
-    def process(self, source: str, zoom_percent: int) -> None:
+    async def process(self, source: str, zoom_percent: int) -> None:
         self.log("\n--- Démarrage du traitement ---")
-        print(self.tmp_dir)
         try:
             self.update_progress(0)
 
             self.download_youtube_video(source)
-            self.update_progress(1 / 3)
+            self.update_progress(1 / 5)
+
+            # Lancement des tâches asynchrones
+            str_filepath = asyncio.create_task(utils.generate_srt_file(self.audio_path))
 
             self.center_on_speaker(zoom_percent)
-            self.update_progress(2 / 3)
+            self.update_progress(2 / 5)
 
-            self.add_subtitles_to_video()
+            self.add_subtitles_to_video(await str_filepath)
+            self.update_progress(3 / 5)
 
             self.cut_into_clips()
-            self.update_progress(1)
+            self.update_progress(4 / 5)
+
+            self.log(f"Génération de la Description Tiktok... ")
+            self.description_tiktok = f"{self.title} - {self.author} \n{self.hashtag[:3]}"
+            self.log(f"Description Tiktok : {self.description_tiktok} ")
+            self.update_progress(5 / 5)
 
             self.log("Traitement terminé")
+            time.sleep(5)
+            self.update_progress(1)
             self.done_callback(self.output_video)
         except Exception as exc:
             self.log(f"Erreur: {exc}")
@@ -325,4 +342,3 @@ class VideoProcessor:
             if self.video_path and os.path.exists(self.video_path):
                 safe_rmtree(os.path.dirname(self.video_path))
             self.update_progress(0)
-

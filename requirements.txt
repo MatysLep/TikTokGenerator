@@ -1,5 +1,6 @@
-pytubefix
-customtkinter
-mediapipe
-opencv-python
-tqdm
+pytubefix~=9.3.0
+customtkinter~=5.2.2
+mediapipe~=0.10.21
+opencv-python~=4.12.0.88
+openai-whisper~=20250625
+transformers~=4.53.3

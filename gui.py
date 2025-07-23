@@ -104,8 +104,13 @@ class App(ctk.CTk):
         self.preview_button.configure(state="disabled")
         self.download_button.configure(state="disabled")
         self.processed_video = None
+
         threading.Thread(
-            target=self.processor.process,
+            target=self.run_async_process,
             args=(source, zoom),
             daemon=True,
         ).start()
+
+    def run_async_process(self, source: str, zoom: int) -> None:
+        import asyncio
+        asyncio.run(self.processor.process(source, zoom))

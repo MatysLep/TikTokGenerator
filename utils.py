@@ -4,7 +4,10 @@ import os
 import shutil
 from pathlib import Path
 import whisper
+from transformers import pipeline
+import asyncio
 
+summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
 
 def get_downloads_dir() -> Path:
     """Return the user's Downloads folder, falling back to creating it."""
@@ -25,7 +28,7 @@ def safe_rmtree(path: str | Path) -> None:
     except OSError:
         pass
 
-def generate_srt_file(audio_path : str) -> str:
+async def generate_srt_file(audio_path : str) -> str:
     # Charger le modèle Whisper (base = rapide)
     model = whisper.load_model("base")
     # Transcrire la vidéo (audio en texte)
@@ -48,6 +51,3 @@ def generate_srt_file(audio_path : str) -> str:
             f.write(f"{i+1}\n{format_time(start)} --> {format_time(end)}\n{text}\n\n")
     print(file_path)
     return file_path
-
-if __name__ == "__main__":
-    generate_srt_file('/Users/matys/Downloads/test.mp4')
