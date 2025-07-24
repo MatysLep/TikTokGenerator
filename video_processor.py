@@ -14,7 +14,7 @@ import mediapipe as mp
 from pytubefix import YouTube
 
 import utils
-from utils import get_downloads_dir, safe_rmtree, generate_srt_file
+from utils import get_downloads_dir, safe_rmtree, generate_styled_subtitles
 
 
 # Reduce TensorFlow logging from MediaPipe
@@ -44,7 +44,7 @@ class VideoProcessor:
         self.log(f"Titre de la vidéo : {yt.title}")
         self.title = re.sub(r'[\\/*?:"<>|]', "_", yt.title)
         self.author = yt.author
-        self.hashtag = re.findall(r"#\w+", self.description_ytb)
+        self.hashtag = re.findall(r"#\w+", yt.description)
 
         video_stream = (
             yt.streams.filter(adaptive=True, only_video=True, file_extension="mp4")
@@ -67,12 +67,7 @@ class VideoProcessor:
         self.video_path = video_stream.download(output_path=self.tmp_dir)
         self.audio_path = audio_stream.download(output_path=self.tmp_dir)
 
-    def add_audio_to_video(
-        self,
-        video_without_audio: str,
-        start_time: float,
-        end_time: float,
-    ) -> str:
+    def add_audio_to_video(self,video_without_audio: str,start_time: float,end_time: float,) -> str:
         """Merge a segment of audio into a video clip."""
         output_video = (
             video_without_audio.replace(".mp4", "_with_audio.mp4")
@@ -226,7 +221,7 @@ class VideoProcessor:
         writer.release()
         face_detection.close()
 
-        self.log(f"Vidéo centrée enregistrée dans {self.output_video}")
+        print(f"Vidéo centrée enregistrée dans {self.output_video}")
 
     def cut_into_clips(self) -> list[str]:
         """Cut the video into 61-second clips with audio."""
@@ -288,9 +283,9 @@ class VideoProcessor:
         self.log(f"{len(output_clips)} clips générés dans {clips_dir}")
         return output_clips
 
-    def add_subtitles_to_video(self,str_filepath) -> None:
+    def add_subtitles_to_video(self,ass_filepath) -> None:
         """
-        Add subtitles from an SRT file to a video using ffmpeg.
+        Add subtitles from an ASS file to a video using ffmpeg.
         """
         self.log("--- Ajout des subtitles ---")
 
@@ -300,7 +295,7 @@ class VideoProcessor:
             "ffmpeg",
             "-y",
             "-i", self.output_video,
-            "-vf", f"subtitles={str_filepath}",
+            "-vf", f"subtitles={ass_filepath}",
             "-c:a", "copy",
             output_path,
         ]
@@ -316,12 +311,12 @@ class VideoProcessor:
             self.update_progress(1 / 5)
 
             # Lancement des tâches asynchrones
-            str_filepath = asyncio.create_task(utils.generate_srt_file(self.audio_path))
+            ass_filepath = asyncio.create_task(utils.generate_styled_subtitles(self.audio_path))
 
             self.center_on_speaker(zoom_percent)
             self.update_progress(2 / 5)
 
-            self.add_subtitles_to_video(await str_filepath)
+            self.add_subtitles_to_video(await ass_filepath)
             self.update_progress(3 / 5)
 
             self.cut_into_clips()

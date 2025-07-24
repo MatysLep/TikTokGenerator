@@ -6,6 +6,7 @@ from pathlib import Path
 import whisper
 from transformers import pipeline
 import asyncio
+import pysubs2
 
 summarizer = pipeline("summarization", model="facebook/bart-large-cnn")
 
@@ -28,26 +29,52 @@ def safe_rmtree(path: str | Path) -> None:
     except OSError:
         pass
 
-async def generate_srt_file(audio_path : str) -> str:
+def format_time(t: float) -> str:
+    """
+    Formate un temps en secondes au format SRT (HH:MM:SS,mmm).
+    """
+    h, rem = divmod(t, 3600)
+    m, s = divmod(rem, 60)
+    ms = int((s - int(s)) * 1000)
+    return f"{int(h):02}:{int(m):02}:{int(s):02},{ms:03}"
+
+async def generate_styled_subtitles(audio_path: str) -> str:
+    """
+    Transcrit un fichier audio avec Whisper et génère des sous-titres stylisés au format ASS.
+
+    :param audio_path: Chemin vers le fichier audio.
+    :return: Chemin vers le fichier ASS généré.
+    """
     # Charger le modèle Whisper (base = rapide)
     model = whisper.load_model("base")
-    # Transcrire la vidéo (audio en texte)
     result = model.transcribe(audio_path, fp16=False)
 
-    file_path = os.path.join(Path(audio_path).parent, 'subtitles.srt')
-    # Sauvegarder en SRT
-    with open(file_path, "w", encoding="utf-8") as f:
-        for i, segment in enumerate(result["segments"]):
-            start = segment["start"]
-            end = segment["end"]
-            text = segment["text"].strip()
+    # Créer les sous-titres à partir du résultat Whisper
+    subs = pysubs2.load_from_whisper(result)
 
-            def format_time(t):
-                h, rem = divmod(t, 3600)
-                m, s = divmod(rem, 60)
-                ms = int((s - int(s)) * 1000)
-                return f"{int(h):02}:{int(m):02}:{int(s):02},{ms:03}"
+    # Appliquer le style
+    subs.styles["Default"].fontname = "Arial"
+    subs.styles["Default"].fontsize = 10
+    subs.styles["Default"].primarycolor = pysubs2.Color(255, 255, 255, 0)
+    subs.styles["Default"].outlinecolor = pysubs2.Color(0, 0, 0, 0)
+    subs.styles["Default"].alignment = pysubs2.Alignment.BOTTOM_CENTER
+    subs.styles["Default"].margin_v = 50
 
-            f.write(f"{i+1}\n{format_time(start)} --> {format_time(end)}\n{text}\n\n")
-    print(file_path)
-    return file_path
+
+    # Ajouter un effet d'apparition mot par mot avec les balises \K (sans disparition) et \1c&H808080& pour mots déjà affichés
+    for line in subs:
+        mots = line.text.split()
+        nb_mots = len(mots)
+        duree = int((line.end - line.start) / max(nb_mots, 1) / 10)
+
+        texte_k = r"{\1c&H808080&}"  # Couleur après affichage (gris clair)
+        for mot in mots:
+            texte_k += f"{{\\K{duree}}}{mot} "
+        line.text = texte_k.strip()
+
+    # Chemin du fichier ASS
+    ass_path = os.path.join(Path(audio_path).parent, 'subtitles.ass')
+    subs.save(ass_path)
+
+    print(ass_path)
+    return ass_path
