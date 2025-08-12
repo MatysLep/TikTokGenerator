@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 import shutil
@@ -7,21 +8,192 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path
-import asyncio
 
 import cv2
 import mediapipe as mp
+import numpy as np
 from pytubefix import YouTube
 
 import utils
-from utils import get_downloads_dir, safe_rmtree, generate_styled_subtitles
-
+from utils import get_downloads_dir, safe_rmtree
 
 # Reduce TensorFlow logging from MediaPipe
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 
 class VideoProcessor:
+    def montage_smart_crop(
+            self,
+            output_size: tuple[int, int] = (1080, 1920),
+            min_confidence: float = 0.60,
+            margin_px: int = 50,
+            detection_step: int = 5,
+            progress_log_step: float = 0.10,
+    ) -> None:
+        """
+        Nouveau montage: *crop intelligent constant* sur toute la vidéo.
+        - Détecte les visages sur des frames échantillonnées (detection_step).
+        - Calcule les marges minimales (garde-fous) gauche/droite/haut/bas sur l'ensemble.
+        - Applique un *crop horizontal symétrique* maximum autorisé (avec marge de 50 px) sans couper les visages.
+        - Conserve les proportions et **remplit toute la largeur** du canvas 9:16. Si la hauteur ne suffit pas, fond flou derrière.
+        """
+        self.log("Démarrage du montage smart-crop…")
+        in_path = self.video_path
+        assert in_path, "Chemin vidéo introuvable"
+
+        cap = cv2.VideoCapture(in_path)
+        fps = cap.get(cv2.CAP_PROP_FPS) or 25.0
+        W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        ow, oh = output_size
+
+        base = Path(in_path).stem
+        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+        self.output_video = os.path.join(self.tmp_dir, f"{base}_smartcrop.mp4")
+        out = cv2.VideoWriter(self.output_video, fourcc, fps, output_size)
+
+        # --- Détecteur visage (MediaPipe)
+        face_detector = mp.solutions.face_detection.FaceDetection(
+            model_selection=1,
+            min_detection_confidence=min_confidence,
+        )
+
+        # --- Scan rapide des marges sûres
+        min_left = float("inf")
+        min_right = float("inf")
+        min_top = float("inf")
+        min_bottom = float("inf")
+        frames_seen = 0
+        frames_with_faces = 0
+        total_faces = 0
+
+        i = -1
+        while True:
+            i += 1
+            ok = cap.grab()
+            if not ok:
+                break
+            if detection_step > 1 and (i % detection_step) != 0:
+                continue
+            ok, frame = cap.retrieve()
+            if not ok:
+                break
+            frames_seen += 1
+
+            # Détection sur image réduite pour la vitesse
+            h0, w0 = frame.shape[:2]
+            small_w = 320
+            small_h = max(1, int(h0 * small_w / max(1, w0)))
+            small = cv2.resize(frame, (small_w, small_h))
+            rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
+            results = face_detector.process(rgb)
+            if not results.detections:
+                continue
+            frames_with_faces += 1
+
+            for det in results.detections:
+                conf = float(det.score[0]) if det.score else 0.0
+                if conf < min_confidence:
+                    continue
+                total_faces += 1
+                bb = det.location_data.relative_bounding_box
+                x = int(bb.xmin * small_w)
+                y = int(bb.ymin * small_h)
+                bw = int(bb.width * small_w)
+                bh = int(bb.height * small_h)
+                # Reprojeter en pleine résolution
+                sx, sy = w0 / small_w, h0 / small_h
+                x = int(x * sx); y = int(y * sy); bw = int(bw * sx); bh = int(bh * sy)
+
+                left_margin = x
+                right_margin = w0 - (x + bw)
+                top_margin = y
+                bottom_margin = h0 - (y + bh)
+                if left_margin < min_left:   min_left = left_margin
+                if right_margin < min_right: min_right = right_margin
+                if top_margin < min_top:     min_top = top_margin
+                if bottom_margin < min_bottom: bottom_margin = bottom_margin if False else min_bottom
+                # the previous line had a typo; correct assignment:
+                if bottom_margin < min_bottom:
+                    min_bottom = bottom_margin
+
+        # Décision de crop horizontal (symétrique)
+        if min_left == float("inf") or min_right == float("inf"):
+            # Aucun visage fiable sur l'échantillon → pas de crop
+            crop_x = 0
+            crop_w = W
+            self.log("Aucun visage détecté de façon fiable → pas de crop horizontal")
+        else:
+            safe_left = max(0, int(min_left - margin_px))
+            safe_right = max(0, int(min_right - margin_px))
+            sym_crop = max(0, min(safe_left, safe_right))
+            # Ne pas dépasser 40% de la largeur pour éviter un zoom excessif
+            sym_crop = min(sym_crop, int(0.40 * W))
+            crop_x = sym_crop
+            crop_w = max(1, W - 2 * sym_crop)
+            self.log(f"Crop horizontal: {sym_crop}px de chaque côté → zone {crop_w}x{H}")
+
+        detect_rate = (frames_with_faces / max(1, frames_seen)) * 100.0
+        self.log(f"Scan visages: frames analysées={frames_seen}, détection sur {detect_rate:.1f}% des frames, visages total={total_faces}")
+
+        # --- Helpers d'assemblage
+        def compose_blur_background(base_frame, inner_frame, target_size):
+            tw, th = target_size
+            fh, fw = base_frame.shape[:2]
+            # BG cover
+            s_bg = max(tw / fw, th / fh)
+            bg = cv2.resize(base_frame, (int(fw * s_bg), int(fh * s_bg)))
+            bh, bw = bg.shape[:2]
+            x0 = max(0, (bw - tw) // 2)
+            y0 = max(0, (bh - th) // 2)
+            bg = bg[y0:y0 + th, x0:x0 + tw]
+            bg = cv2.GaussianBlur(bg, (0, 0), sigmaX=max(1, tw // 100))
+            # Center inner
+            ih, iw = inner_frame.shape[:2]
+            canvas = bg.copy()
+            x1 = (tw - iw) // 2
+            y1 = (th - ih) // 2
+            canvas[y1:y1 + ih, x1:x1 + iw] = inner_frame
+            return canvas
+
+        # --- Deuxième passe: rendu
+        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+        frame_idx = 0
+        last_progress_ratio_logged = -1.0
+        while True:
+            ok, frame = cap.read()
+            if not ok:
+                break
+            frame_idx += 1
+
+            # Extraire la bande horizontale croppée
+            sub = frame[:, crop_x:crop_x + crop_w]
+            # Mise à l'échelle pour remplir la largeur cible
+            scale = ow / sub.shape[1]
+            new_h = int(sub.shape[0] * scale)
+            scaled = cv2.resize(sub, (ow, new_h))
+
+            if new_h >= oh:
+                # Recadrage vertical centré (pas de déformation)
+                y0 = (new_h - oh) // 2
+                current = scaled[y0:y0 + oh, :]
+            else:
+                # Letterbox vertical → combler avec fond flou
+                current = compose_blur_background(frame, scaled, (ow, oh))
+
+            out.write(current)
+
+            if n_frames > 0:
+                ratio = frame_idx / n_frames
+                if ratio - last_progress_ratio_logged >= progress_log_step:
+                    self.log(f"Smart-crop: {int(ratio*100):3d}%")
+                    last_progress_ratio_logged = ratio
+
+        cap.release()
+        out.release()
+        face_detector.close()
+        self.log(f"Montage smart-crop enregistré dans {self.output_video}")
     """Handle the different video processing steps."""
 
     def __init__(self, log_callback, progress_callback, done_callback,):
@@ -118,110 +290,47 @@ class VideoProcessor:
 
         return output_video
 
-    def center_on_speaker(self, zoom_percent: int):
-        """Center video on the detected speaker."""
-        self.log("Centrage de la vidéo sur le locuteur ...")
 
-        self.output_video = os.path.join(self.tmp_dir, f"{Path(self.video_path).stem}_centered.mp4")
 
-        cap = cv2.VideoCapture(self.video_path)
-        fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-        target_ratio = 9 / 16
-        out_w, out_h = width, int(width / target_ratio)
-        if out_h > height:
-            out_h = height
-            out_w = int(height * target_ratio)
-
-        writer = cv2.VideoWriter(str(self.output_video), fourcc, fps, (out_w, out_h))
-
-        face_detection = mp.solutions.face_detection.FaceDetection(
-            model_selection=1, min_detection_confidence=0.5
+    def _probe_duration(self, path: str) -> float:
+        """Return media duration in seconds using ffprobe (fallback when CAP_PROP_FRAME_COUNT is 0)."""
+        command = [
+            "ffprobe",
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            path,
+        ]
+        result = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
-        tolerance = 50
-        smooth_factor = 0.2
+        try:
+            return float((result.stdout or "0").strip())
+        except Exception:
+            return 0.0
 
-        target_center = None
-        target_size = None
-        current_center = None
-        current_size = None
-
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            results = face_detection.process(frame_rgb)
-
-            if results.detections:
-                detection = results.detections[0]
-                bbox = detection.location_data.relative_bounding_box
-                cx_new = int((bbox.xmin + bbox.width / 2) * width)
-                cy_new = int((bbox.ymin + bbox.height / 2) * height)
-                size_new = (
-                    int(bbox.width * width),
-                    int(bbox.height * height),
-                )
-
-                if target_center is None:
-                    target_center = (cx_new, cy_new)
-                    target_size = size_new
-                    current_center = target_center
-                    current_size = target_size
-                else:
-                    tx, ty = target_center
-                    if abs(cx_new - tx) > tolerance or abs(cy_new - ty) > tolerance:
-                        target_center = (cx_new, cy_new)
-                        target_size = size_new
-            elif target_center is None:
-                target_center = (width // 2, height // 2)
-                target_size = (out_w, out_h)
-                current_center = target_center
-                current_size = target_size
-
-            if current_center is None:
-                current_center = target_center
-            else:
-                cx, cy = current_center
-                tx, ty = target_center
-                current_center = (
-                    int(cx + smooth_factor * (tx - cx)),
-                    int(cy + smooth_factor * (ty - cy)),
-                )
-
-            if current_size is None:
-                current_size = target_size
-            else:
-                cw, ch = current_size
-                tw, th = target_size
-                current_size = (
-                    int(cw + smooth_factor * (tw - cw)),
-                    int(ch + smooth_factor * (th - ch)),
-                )
-
-            cx, cy = current_center
-            fw, fh = current_size
-            crop_w = int(out_w - (zoom_percent / 100) * (out_w - fw))
-            crop_h = int(out_h - (zoom_percent / 100) * (out_h - fh))
-            crop_w = max(1, min(crop_w, width))
-            crop_h = max(1, min(crop_h, height))
-
-            left = max(0, min(cx - crop_w // 2, width - crop_w))
-            top = max(0, min(cy - crop_h // 2, height - crop_h))
-
-            cropped = frame[top : top + crop_h, left : left + crop_w]
-            cropped = cv2.resize(cropped, (out_w, out_h))
-            writer.write(cropped)
-
-        cap.release()
-        writer.release()
-        face_detection.close()
-
-        print(f"Vidéo centrée enregistrée dans {self.output_video}")
+    def detect_scenes_ffmpeg(self, path: str, threshold: float = 0.40) -> list[float]:
+        """
+        Detect scene changes using FFmpeg's 'scene' score.
+        Returns a sorted list of times (in seconds) where a cut is detected.
+        `threshold` higher -> fewer cuts. Typical values 0.35–0.50.
+        """
+        import re
+        cmd = [
+            "ffmpeg", "-hide_banner", "-i", path,
+            "-filter:v", f"select=gt(scene,{threshold}),showinfo",
+            "-f", "null", "-",
+        ]
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        times = []
+        pattern = re.compile(r"pts_time:(\d+\.\d+).*scene:(\d+\.\d+)")
+        for line in (proc.stderr or "").splitlines():
+            m = pattern.search(line)
+            if m:
+                t = float(m.group(1))
+                times.append(t)
+        # Deduplicate & sort
+        return sorted(set(times))
 
     def cut_into_clips(self) -> list[str]:
         """Cut the video into 61-second clips with audio."""
@@ -310,10 +419,22 @@ class VideoProcessor:
             self.download_youtube_video(source)
             self.update_progress(1 / 5)
 
+            # Détection des scènes en amont pour un log immédiat
+            scene_threshold = 0.40
+            total_duration = self._probe_duration(self.video_path)
+            cuts = self.detect_scenes_ffmpeg(self.video_path, threshold=scene_threshold)
+            scene_starts = [0.0] + [t for t in cuts if 0.0 < t < max(0.0, total_duration)]
+            scene_ends = scene_starts[1:] + [total_duration]
+            scenes = list(zip(scene_starts, scene_ends)) if total_duration > 0 else [(0.0, float("inf"))]
+            short_lt10 = sum(1 for s, e in scenes if (e - s) < 10.0)
+            mid_10_15 = sum(1 for s, e in scenes if 10.0 <= (e - s) < 15.0)
+            long_ge15 = sum(1 for s, e in scenes if (e - s) >= 15.0)
+            self.log(f"Plans détectés: {len(scenes)} ( <10s: {short_lt10} • 10–15s: {mid_10_15} • ≥15s: {long_ge15} )")
+
             # Lancement des tâches asynchrones
             ass_filepath = asyncio.create_task(utils.generate_styled_subtitles(self.audio_path))
 
-            self.center_on_speaker(zoom_percent)
+            self.montage_smart_crop()
             self.update_progress(2 / 5)
 
             self.add_subtitles_to_video(await ass_filepath)
@@ -323,7 +444,7 @@ class VideoProcessor:
             self.update_progress(4 / 5)
 
             self.log(f"Génération de la Description Tiktok... ")
-            self.description_tiktok = f"{self.title} - {self.author} \n{self.hashtag[:3]}"
+            self.description_tiktok = f"{self.title} - {self.author} \n{' '.join(self.hashtag[:3])}"
             self.log(f"Description Tiktok : {self.description_tiktok} ")
             self.update_progress(5 / 5)
 
