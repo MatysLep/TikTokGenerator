@@ -1,28 +1,59 @@
-# TikTokGenerator
+# 🎬 TikTok Clip Generator
 
-## Dépendances
+Projet personnel de développement d'une application de génération automatique de vidéos TikTok à partir de vidéos locales ou YouTube.
 
-Ce projet utilise `pytubefix` pour le téléchargement des vidéos YouTube ainsi
-que `customtkinter` pour l'interface graphique. Une étape de centrage de la
-vidéo s'appuie sur `mediapipe` et `opencv-python`. Une barre de progression
-basée sur `tqdm` affiche l'avancement du traitement. Installez les
-dépendances avec :
+## 📌 Description
 
-```bash
-pip install pytubefix customtkinter mediapipe opencv-python tqdm
-```
+**TikTok Clip Generator** est un outil automatisé développé avec **Python** et **Streamlit** permettant de créer rapidement des vidéos optimisées pour TikTok (ou autres formats verticaux).  
+Il prend en entrée un **lien YouTube** ou un **fichier vidéo local** et génère automatiquement :
+- Une vidéo recadrée au format 9:16 avec un **smart crop** basé sur la détection de visages
+- Des **sous-titres stylisés**
+- Des **clips de 61 secondes** prêts à la publication
 
-## Fonctionnalités
+---
 
- - Téléchargement temporaire d'une vidéo YouTube.
-- Découpage fictif en clips (fonction `cut_into_clips`).
-- Centrage automatique sur le locuteur avec un zoom réglable de 0 à 100 % via
-  un curseur. Une étiquette affiche la valeur courante du zoom. La fonction
-  `center_on_speaker` applique ce facteur et la vidéo générée est recadrée au
-  format 9/16 sans bandes noires.
-- Barre de progression de 3 étapes affichée au-dessus de la console de logs.
- - L'interface permet de coller un lien YouTube pour lancer le traitement.
-- Une fois le traitement terminé, un bouton permet de prévisualiser la vidéo
-  centrée et un autre de l'enregistrer à l'emplacement souhaité.
+## 🛠️ Fonctionnalités principales
 
+- **Téléchargement YouTube** (vidéo + audio) avec [pytubefix](https://pypi.org/project/pytubefix/)
+- **Chargement de fichiers locaux**
+- **Recadrage intelligent** (smart crop) avec [MediaPipe](https://mediapipe.dev/) pour centrer les visages et remplir les marges avec un fond flouté
+- **Ajout automatique de sous-titres** stylisés
+- **Découpage automatique** en clips de 61 secondes avec audio synchronisé
+- **Interface web interactive** via Streamlit
+- **Suivi de progression en temps réel**
+- **Export automatique** :
+  - Vidéo finale → `~/Downloads/final`
+  - Clips → `~/Downloads/clips`
 
+---
+
+## 🧱 Architecture du projet
+
+- `app.py` : interface Streamlit (UI)
+- `video_processor.py` : pipeline de traitement vidéo (smart crop, sous-titres, découpe)
+- `utils.py` : fonctions utilitaires (génération de sous-titres, gestion des chemins, etc.)
+- `requirements.txt` : dépendances Python
+
+---
+
+## 🔌 Technologies utilisées
+
+- **Python**
+- **Streamlit** (interface utilisateur)
+- **OpenCV** (traitement d'images)
+- **MediaPipe** (détection de visages)
+- **FFmpeg** (manipulation audio/vidéo)
+- **pytubefix** (téléchargement YouTube)
+
+---
+
+👤 Auteur
+
+Matys Lepretre
+Projet personnel
+
+--- 
+
+📄 Licence
+
+Projet personnel – Tous droits réservés.

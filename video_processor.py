@@ -1,11 +1,6 @@
-import os
-import shutil
 import subprocess
 import tempfile
 import re
-from pathlib import Path
-import math
-
 import cv2
 from pytubefix import YouTube
 import mediapipe as mp
@@ -25,7 +20,7 @@ class VideoProcessor:
     _OUT_H = 1920
     _MIN_CONF = 0.80
     _MARGIN_PX = 15
-    _DETECTION_STEP = 5
+    _DETECTION_STEP = 10
     _CLIP_SECONDS = 61
 
     def __init__(self, log_callback, progress_callback, done_callback):
@@ -79,7 +74,7 @@ class VideoProcessor:
             raise FileNotFoundError(f"Fichier introuvable: {path}")
         self.video_path = str(p)
         self.title = p.stem
-        self.author = "Local file"
+        self.author = ""
         self.hashtag = []
 
         audio_out = os.path.join(self.tmp_dir, f"{p.stem}.m4a")
