@@ -4,3 +4,7 @@ mediapipe~=0.10.21
 opencv-python~=4.12.0.88
 openai-whisper~=20250625
 transformers~=4.53.3
+streamlit~=1.48.0
+pysubs2~=1.8.0
+numpy~=2.2.0
+protobuf~=4.25.8
