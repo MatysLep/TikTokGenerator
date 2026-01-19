@@ -80,4 +80,4 @@ J'ai implémenté un **système de "Smart Crop" en deux passes** :
 
 ---
 
-*Projet réalisé par [Votre Nom] - 2026*
+*Projet réalisé par Lepretre Matys - 2025*
